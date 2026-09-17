@@ -149,6 +149,13 @@ export default function WorkspaceEditor({
     if (expandedIndex === index) setExpandedIndex(null);
   };
 
+  const handleClearScreen = (screenIndex: number) => {
+    setActions((prev) =>
+      prev.filter((act) => (act.placement?.screen || 1) !== screenIndex)
+    );
+    setExpandedIndex(null);
+  };
+
   const handleUpdateAction = (index: number, updated: Partial<Action>) => {
     setActions((prev) =>
       prev.map((act, i) => (i === index ? { ...act, ...updated } : act))
@@ -763,6 +770,23 @@ export default function WorkspaceEditor({
                       ))
                     )}
                   </div>
+
+                  {screenApps.length > 0 && (
+                    <div className="flex justify-end pt-1 mt-auto">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleClearScreen(m.index);
+                        }}
+                        className="flex items-center space-x-1 px-2 py-0.5 text-[10px] font-medium text-rose-400/90 hover:text-rose-300 hover:bg-rose-500/15 rounded border border-rose-500/20 hover:border-rose-500/40 transition cursor-pointer"
+                        title={`Delete all windows on ${m.name}`}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Delete all</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
