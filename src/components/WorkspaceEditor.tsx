@@ -13,6 +13,7 @@ import {
   Plus,
   ArrowLeft,
   X,
+  Folder,
 } from 'lucide-react';
 import { Action, CapturedLayout, MonitorInfo, Placement, Preset, SwitchAwayAction, ChromeProfile } from '../types';
 
@@ -98,6 +99,8 @@ export default function WorkspaceEditor({
           const match = w.title.match(/\[([a-zA-Z]:\\[^\]]+)\]/);
           if (match && match[1]) {
             args = [match[1]];
+          } else if (w.suggested_url) {
+            args = [w.suggested_url];
           }
         }
 
@@ -324,6 +327,9 @@ export default function WorkspaceEditor({
     if (exe.includes('notepad') || exe.includes('code')) {
       return <FileText className="w-5 h-5 text-amber-400 shrink-0" />;
     }
+    if (exe.includes('explorer')) {
+      return <Folder className="w-5 h-5 text-amber-400 shrink-0" />;
+    }
     return <Layers className="w-5 h-5 text-indigo-400 shrink-0" />;
   };
 
@@ -347,6 +353,7 @@ export default function WorkspaceEditor({
     };
 
     const isChrome = act.is_chrome_app || act.executable.toLowerCase().includes('chrome');
+    const isExplorer = act.executable.toLowerCase().includes('explorer');
 
     let currentUrl = '';
     let currentProfile = '';
@@ -383,6 +390,10 @@ export default function WorkspaceEditor({
                 ) : isChrome ? (
                   <span className="text-[10px] font-mono bg-slate-700/40 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full">
                     Chrome Browser
+                  </span>
+                ) : isExplorer ? (
+                  <span className="text-[10px] font-mono bg-amber-500/15 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                    Folder
                   </span>
                 ) : null}
               </div>
@@ -425,6 +436,25 @@ export default function WorkspaceEditor({
                       )}
                     </select>
                   </div>
+                </div>
+              )}
+              {isExplorer && (
+                <div
+                  className="mt-2 flex items-center space-x-2"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span className="text-[10px] font-bold text-amber-400 font-mono shrink-0">
+                    Folder Path:
+                  </span>
+                  <input
+                    type="text"
+                    value={act.args[0] || ''}
+                    onChange={(e) => {
+                      handleUpdateAction(index, { args: [e.target.value] });
+                    }}
+                    placeholder="e.g. C:\Users\User\Downloads"
+                    className="bg-slate-900/90 border border-slate-700/80 hover:border-amber-500/60 focus:border-amber-400 rounded px-2.5 py-1 text-slate-100 text-[11px] font-mono focus:outline-none w-full max-w-lg transition"
+                  />
                 </div>
               )}
             </div>
@@ -559,6 +589,26 @@ export default function WorkspaceEditor({
                     )}
                   </p>
                 </div>
+              </div>
+            )}
+
+            {isExplorer && (
+              <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 space-y-2">
+                <label className="block text-[11px] text-slate-400 font-mono">
+                  Folder Path to Open:
+                </label>
+                <input
+                  type="text"
+                  value={act.args[0] || ''}
+                  onChange={(e) => {
+                    handleUpdateAction(index, { args: [e.target.value] });
+                  }}
+                  placeholder="e.g. C:\Users\User\Downloads"
+                  className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-slate-100 text-xs font-mono focus:outline-none focus:border-amber-500"
+                />
+                <p className="text-[10px] text-slate-500">
+                  Will open in File Explorer: <span className="font-mono text-amber-300">explorer.exe &quot;{act.args[0] || '&lt;Folder Path&gt;'}&quot;</span>
+                </p>
               </div>
             )}
 

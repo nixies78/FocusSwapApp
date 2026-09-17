@@ -220,6 +220,21 @@ pub fn get_title_keyword(action: &Action) -> Option<String> {
         return Some(kw);
     }
 
+    let exe_lower = action.executable.to_lowercase();
+    if exe_lower.contains("explorer") {
+        if let Some(arg) = action.args.first() {
+            let clean = arg.trim().trim_matches('"');
+            if !clean.is_empty() {
+                let p = Path::new(clean);
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    if !name.is_empty() {
+                        return Some(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+
     if let Some(ref title) = action.title {
         let mut clean = title.as_str().trim_start_matches('*').trim();
         if let Some(pos) = clean.find(" - Google Chrome") {
@@ -395,10 +410,13 @@ pub fn execute_action(
         None
     };
 
+    let is_explorer = exe_to_run.to_lowercase().contains("explorer");
+    let target_pid = if is_explorer { None } else { Some(child_pid) };
+
     std::thread::spawn(move || {
-        // First attempt to find window by PID (ignoring windows that existed before launch)
+        // First attempt to find window by PID (or title hint for explorer which hands off to shell process)
         let hwnd_opt = wait_for_window(
-            Some(child_pid),
+            target_pid,
             title_hint.as_deref().or(fallback_title.as_deref()),
             Some(&pre_existing_hwnds),
             is_chrome_app,

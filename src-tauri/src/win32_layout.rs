@@ -4,6 +4,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 use windows::core::PWSTR;
 use windows::Win32::Foundation::{BOOL, CloseHandle, HWND, LPARAM, RECT};
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
     MONITOR_DEFAULTTONEAREST, MonitorFromWindow,
@@ -13,7 +14,7 @@ use windows::Win32::System::Threading::{
     PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, EnumWindows, GetWindowRect, GetWindowTextLengthW,
+    BringWindowToTop, EnumWindows, GetClassNameW, GetWindowRect, GetWindowTextLengthW,
     GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
     IsZoomed, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP,
     SWP_SHOWWINDOW, SW_MAXIMIZE, SW_RESTORE, SW_SHOW,
@@ -132,6 +133,17 @@ unsafe extern "system" fn capture_windows_callback(hwnd: HWND, lparam: LPARAM) -
     let is_min = IsIconic(hwnd).as_bool();
     let is_max = IsZoomed(hwnd).as_bool();
 
+    let mut cloaked: u32 = 0;
+    let _ = DwmGetWindowAttribute(
+        hwnd,
+        DWMWA_CLOAKED,
+        &mut cloaked as *mut u32 as *mut _,
+        std::mem::size_of::<u32>() as u32,
+    );
+    if cloaked != 0 {
+        return BOOL(1);
+    }
+
     let mut rect = RECT::default();
     if GetWindowRect(hwnd, &mut rect).is_ok() {
         let width = rect.right - rect.left;
@@ -196,13 +208,28 @@ unsafe extern "system" fn capture_windows_callback(hwnd: HWND, lparam: LPARAM) -
         return BOOL(1);
     }
 
-    // Ignore known system background binaries
     let exe_lower = exe_name.to_lowercase();
-    if exe_lower == "explorer.exe"
-        || exe_lower == "shellexperiencehost.exe"
+
+    let mut class_buf = vec![0u16; 256];
+    let class_len = GetClassNameW(hwnd, &mut class_buf);
+    let class_name = String::from_utf16_lossy(&class_buf[..class_len as usize]);
+
+    let is_file_explorer = (exe_lower == "explorer.exe" || exe_lower == "explorer")
+        && (class_name == "CabinetWClass" || class_name == "ExploreWClass");
+
+    // Ignore shell/desktop/taskbar explorer windows, but keep actual folder windows
+    if (exe_lower == "explorer.exe" || exe_lower == "explorer") && !is_file_explorer {
+        return BOOL(1);
+    }
+
+    // Ignore known system background binaries and ghost settings
+    if exe_lower == "shellexperiencehost.exe"
         || exe_lower == "searchhost.exe"
         || exe_lower == "lockapp.exe"
         || exe_lower == "taskmgr.exe"
+        || exe_lower == "systemsettings.exe"
+        || exe_lower == "startmenuexperiencehost.exe"
+        || exe_lower == "textinputhost.exe"
     {
         return BOOL(1);
     }
@@ -230,6 +257,9 @@ unsafe extern "system" fn capture_windows_callback(hwnd: HWND, lparam: LPARAM) -
         if title_lower.contains("calc") {
             exe_name = "calc.exe".to_string();
             exe_path = r"C:\Windows\System32\calc.exe".to_string();
+        } else {
+            // Ignore generic background ApplicationFrameHost instances like Settings
+            return BOOL(1);
         }
     }
 
@@ -261,6 +291,42 @@ unsafe extern "system" fn capture_windows_callback(hwnd: HWND, lparam: LPARAM) -
         } else if title_lower.contains("chatgpt") {
             suggested_url = Some("https://chatgpt.com".to_string());
         }
+    } else if is_file_explorer {
+        let user_profile = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".to_string());
+        let t_clean = title.trim();
+        let t_lower = t_clean.to_lowercase();
+
+        let folder_path = match t_lower.as_str() {
+            "downloads" => Some(format!("{}\\Downloads", user_profile)),
+            "documents" => Some(format!("{}\\Documents", user_profile)),
+            "pictures" => Some(format!("{}\\Pictures", user_profile)),
+            "desktop" => Some(format!("{}\\Desktop", user_profile)),
+            "music" => Some(format!("{}\\Music", user_profile)),
+            "videos" => Some(format!("{}\\Videos", user_profile)),
+            "home" | "this pc" => Some("shell:MyComputerFolder".to_string()),
+            _ => {
+                if Path::new(t_clean).exists() {
+                    Some(t_clean.to_string())
+                } else {
+                    let sub = format!("{}\\{}", user_profile, t_clean);
+                    if Path::new(&sub).exists() {
+                        Some(sub)
+                    } else {
+                        let mut found = None;
+                        for drive in ['C', 'D', 'E', 'F'] {
+                            let cand = format!("{}:\\{}", drive, t_clean);
+                            if Path::new(&cand).exists() {
+                                found = Some(cand);
+                                break;
+                            }
+                        }
+                        found.or_else(|| Some(t_clean.to_string()))
+                    }
+                }
+            }
+        };
+
+        suggested_url = folder_path;
     }
 
     let id = format!("{}_{}", exe_name, process_id);
@@ -334,6 +400,17 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
     let ctx = &mut *(lparam.0 as *mut FindContext);
 
     if !IsWindowVisible(hwnd).as_bool() {
+        return BOOL(1);
+    }
+
+    let mut cloaked: u32 = 0;
+    let _ = DwmGetWindowAttribute(
+        hwnd,
+        DWMWA_CLOAKED,
+        &mut cloaked as *mut u32 as *mut _,
+        std::mem::size_of::<u32>() as u32,
+    );
+    if cloaked != 0 {
         return BOOL(1);
     }
 
