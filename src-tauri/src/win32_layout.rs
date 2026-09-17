@@ -369,13 +369,7 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
         return BOOL(1);
     }
 
-    // If require_app_mode is true, skip regular tabbed browser windows ending with " - Google Chrome" or " - Microsoft Edge"
-    if ctx.require_app_mode {
-        let title_lower = title.to_lowercase();
-        if title_lower.ends_with(" - google chrome") || title_lower.ends_with(" - microsoft edge") {
-            return BOOL(1);
-        }
-    }
+
 
     if let Some(target_pid) = ctx.target_pid {
         if process_id == target_pid && length > 0 {

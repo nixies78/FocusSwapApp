@@ -195,7 +195,7 @@ export default function WorkspaceEditor({
 
     const newArgs: string[] = [];
     if (profile) {
-      newArgs.push(`--profile-directory="${profile}"`);
+      newArgs.push(`--profile-directory=${profile}`);
     }
     if (isChecked) {
       newArgs.push(`--app=${url}`, '--new-window');
@@ -220,7 +220,7 @@ export default function WorkspaceEditor({
 
     const newArgs: string[] = [];
     if (profile) {
-      newArgs.push(`--profile-directory="${profile}"`);
+      newArgs.push(`--profile-directory=${profile}`);
     }
     if (act.is_chrome_app) {
       newArgs.push(`--app=${newUrl}`, '--new-window');
@@ -249,7 +249,7 @@ export default function WorkspaceEditor({
 
     const newArgs: string[] = [];
     if (newProfile) {
-      newArgs.push(`--profile-directory="${newProfile}"`);
+      newArgs.push(`--profile-directory=${newProfile}`);
     }
     if (act.is_chrome_app) {
       newArgs.push(`--app=${url}`, '--new-window');
@@ -397,11 +397,26 @@ export default function WorkspaceEditor({
                     placeholder="https://calendar.google.com/calendar/u/1/r?tab=mc"
                     className="bg-slate-900/90 border border-slate-700/80 hover:border-cyan-500/60 focus:border-cyan-400 rounded px-2.5 py-1 text-slate-100 text-[11px] font-mono focus:outline-none w-full max-w-lg transition"
                   />
-                  {currentProfile && (
-                    <span className="text-[10px] font-mono bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded shrink-0">
-                      Profile: {currentProfile}
+                  <div className="flex items-center space-x-1.5 shrink-0">
+                    <span className="text-[10px] font-bold text-indigo-400 font-mono shrink-0">
+                      Profile:
                     </span>
-                  )}
+                    <select
+                      value={currentProfile}
+                      onChange={(e) => handleChromeProfileChange(index, e.target.value)}
+                      className="bg-slate-900 border border-slate-700/80 hover:border-indigo-500/60 focus:border-indigo-400 rounded px-2 py-1 text-slate-100 text-[11px] font-mono focus:outline-none transition cursor-pointer"
+                    >
+                      <option value="">Default Profile</option>
+                      {chromeProfiles.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} {p.user_name ? `(${p.user_name})` : `[${p.id}]`}
+                        </option>
+                      ))}
+                      {currentProfile && !chromeProfiles.some((p) => p.id === currentProfile) && (
+                        <option value={currentProfile}>{currentProfile}</option>
+                      )}
+                    </select>
+                  </div>
                 </div>
               )}
             </div>
@@ -496,16 +511,19 @@ export default function WorkspaceEditor({
                         onChange={(e) => handleChromeProfileChange(index, e.target.value)}
                         className="bg-slate-900 border border-slate-700/80 rounded px-2.5 py-1 text-slate-100 text-xs focus:outline-none focus:border-cyan-500 font-mono"
                       >
-                        <option value="">Default Profile</option>
-                        {chromeProfiles.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} {p.user_name ? `(${p.user_name})` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
+                      <option value="">Default Profile</option>
+                      {chromeProfiles.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} {p.user_name ? `(${p.user_name})` : `[${p.id}]`}
+                        </option>
+                      ))}
+                      {currentProfile && !chromeProfiles.some((p) => p.id === currentProfile) && (
+                        <option value={currentProfile}>{currentProfile}</option>
+                      )}
+                    </select>
+                  </div>
+                )}
+              </div>
 
                 <div className="pt-1 space-y-1">
                   <label className="block text-[11px] text-slate-400 font-mono">

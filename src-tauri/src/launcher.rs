@@ -361,12 +361,18 @@ pub fn execute_action(
     let mut cmd = Command::new(&exe_to_run);
     for arg in &args_to_run {
         let clean = arg.trim();
-        let stripped = if clean.len() >= 2 && ((clean.starts_with('"') && clean.ends_with('"')) || (clean.starts_with('\'') && clean.ends_with('\''))) {
-            &clean[1..clean.len() - 1]
+        let normalized = if clean.starts_with("--") && clean.contains('=') {
+            let parts: Vec<&str> = clean.splitn(2, '=').collect();
+            let key = parts[0];
+            let val = parts[1].trim();
+            let clean_val = val.trim_matches('"').trim_matches('\'');
+            format!("{}={}", key, clean_val)
+        } else if (clean.starts_with('"') && clean.ends_with('"')) || (clean.starts_with('\'') && clean.ends_with('\'')) {
+            clean[1..clean.len() - 1].to_string()
         } else {
-            clean
+            clean.to_string()
         };
-        cmd.arg(stripped);
+        cmd.arg(&normalized);
     }
 
     let child = cmd
