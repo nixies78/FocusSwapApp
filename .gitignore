@@ -1,3 +1,6 @@
+# Logs
+*.log
+
 # Python
 __pycache__/
 *.py[cod]
@@ -22,8 +25,8 @@ yarn-error.log*
 *.pem
 *.key
 
-# IDE & OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+**/*.rs.bk
+

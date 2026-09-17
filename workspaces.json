@@ -1,0 +1,135 @@
+{
+  "presets": [
+    {
+      "id": "calendar_8793",
+      "name": "Calendar",
+      "shortcut": "1",
+      "on_switch_away": "nothing",
+      "actions": [
+        {
+          "type": "launch",
+          "executable": "chrome.exe",
+          "args": [
+            "--app=https://calendar.google.com",
+            "--new-window"
+          ],
+          "placement": {
+            "x": -13,
+            "y": -13,
+            "width": 3866,
+            "height": 2090,
+            "screen": 1,
+            "maximized": true
+          },
+          "title": "Google Calendar",
+          "is_chrome_app": true,
+          "on_switch_away": "kill"
+        }
+      ]
+    },
+    {
+      "id": "gemini_7351",
+      "name": "Gemini",
+      "shortcut": "2",
+      "on_switch_away": "nothing",
+      "actions": [
+        {
+          "type": "launch",
+          "executable": "chrome.exe",
+          "args": [
+            "--app=https://gemini.google.com/app",
+            "--new-window"
+          ],
+          "placement": {
+            "x": 2145,
+            "y": 0,
+            "width": 1706,
+            "height": 2075,
+            "screen": 1,
+            "maximized": false
+          },
+          "title": "Google Gemini",
+          "is_chrome_app": true,
+          "on_switch_away": "temp_minimize"
+        }
+      ]
+    },
+    {
+      "id": "calulator_0653",
+      "name": "Calculator",
+      "shortcut": "3",
+      "on_switch_away": "nothing",
+      "actions": [
+        {
+          "type": "launch",
+          "executable": "calc.exe",
+          "args": [],
+          "placement": {
+            "x": 1464,
+            "y": 681,
+            "width": 1216,
+            "height": 1078,
+            "screen": 1,
+            "maximized": false
+          },
+          "title": "Calculator",
+          "is_chrome_app": false,
+          "on_switch_away": "kill"
+        }
+      ]
+    },
+    {
+      "id": "workspace_4_6568",
+      "name": "Blender Print Prep",
+      "shortcut": "4",
+      "on_switch_away": "nothing",
+      "actions": [
+        {
+          "type": "launch",
+          "executable": "C:\\Program Files\\Blender Foundation\\Blender 5.1\\blender.exe",
+          "args": [
+            "C:\\Users\\User\\PrintPrep.blend"
+          ],
+          "placement": {
+            "x": -13,
+            "y": -13,
+            "width": 3866,
+            "height": 2090,
+            "screen": 1,
+            "maximized": true
+          },
+          "title": "PrintPrep",
+          "is_chrome_app": false,
+          "on_switch_away": "temp_minimize"
+        }
+      ]
+    },
+    {
+      "id": "youtube_8408",
+      "name": "Youtube",
+      "shortcut": "5",
+      "on_switch_away": "nothing",
+      "actions": [
+        {
+          "type": "launch",
+          "executable": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+          "args": [
+            "--app=https://www.youtube.com/feed/subscriptions",
+            "--new-window"
+          ],
+          "placement": {
+            "x": -13,
+            "y": -13,
+            "width": 3866,
+            "height": 2090,
+            "screen": 1,
+            "maximized": true
+          },
+          "title": "Subscriptions - YouTube",
+          "is_chrome_app": true,
+          "on_switch_away": "kill"
+        }
+      ]
+    }
+  ]
+}

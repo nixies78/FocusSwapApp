@@ -1,0 +1,64 @@
+{
+  "presets": [
+    {
+      "id": "calendar",
+      "name": "Quick Calendar",
+      "shortcut": "1",
+      "actions": [
+        {
+          "type": "launch",
+          "executable": "chrome.exe",
+          "args": [
+            "--app=https://calendar.google.com",
+            "--new-window"
+          ],
+          "placement": {
+            "x": 200,
+            "y": 150,
+            "width": 1200,
+            "height": 800
+          }
+        }
+      ]
+    },
+    {
+      "id": "notes",
+      "name": "Scratchpad & Docs",
+      "shortcut": "2",
+      "actions": [
+        {
+          "type": "launch",
+          "executable": "notepad.exe",
+          "args": [],
+          "placement": {
+            "x": 100,
+            "y": 100,
+            "width": 800,
+            "height": 700
+          }
+        }
+      ]
+    },
+    {
+      "id": "notion",
+      "name": "Notion Workspace",
+      "shortcut": "3",
+      "actions": [
+        {
+          "type": "launch",
+          "executable": "chrome.exe",
+          "args": [
+            "--app=https://www.notion.so",
+            "--new-window"
+          ],
+          "placement": {
+            "x": 250,
+            "y": 120,
+            "width": 1300,
+            "height": 850
+          }
+        }
+      ]
+    }
+  ]
+}
