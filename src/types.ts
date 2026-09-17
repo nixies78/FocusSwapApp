@@ -57,3 +57,10 @@ export interface CapturedLayout {
   monitors: MonitorInfo[];
   windows: CapturedWindow[];
 }
+
+export interface ChromeProfile {
+  id: string;
+  name: string;
+  user_name: string;
+}
+

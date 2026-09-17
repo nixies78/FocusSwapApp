@@ -62,6 +62,56 @@ pub fn find_chrome_executable() -> Option<PathBuf> {
     None
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChromeProfile {
+    pub id: String,
+    pub name: String,
+    pub user_name: String,
+}
+
+pub fn detect_chrome_profiles() -> Vec<ChromeProfile> {
+    let mut profiles = Vec::new();
+
+    let local_app_data = match std::env::var("LOCALAPPDATA") {
+        Ok(v) => PathBuf::from(v),
+        Err(_) => return profiles,
+    };
+
+    let local_state_path = local_app_data
+        .join("Google")
+        .join("Chrome")
+        .join("User Data")
+        .join("Local State");
+
+    if !local_state_path.exists() {
+        return profiles;
+    }
+
+    let contents = match std::fs::read_to_string(&local_state_path) {
+        Ok(c) => c,
+        Err(_) => return profiles,
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&contents) {
+        Ok(v) => v,
+        Err(_) => return profiles,
+    };
+
+    if let Some(info_cache) = json.get("profile").and_then(|p| p.get("info_cache")).and_then(|i| i.as_object()) {
+        for (profile_id, data) in info_cache {
+            let name = data.get("name").and_then(|v| v.as_str()).unwrap_or(profile_id).to_string();
+            let user_name = data.get("user_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            profiles.push(ChromeProfile {
+                id: profile_id.clone(),
+                name,
+                user_name,
+            });
+        }
+    }
+
+    profiles
+}
+
 /// Helper to derive a probable window title keyword from arguments (e.g. for Google Calendar, Gemini, YouTube, or Notion)
 pub fn extract_keyword_from_args(args: &[String]) -> Option<String> {
     for arg in args {
@@ -310,7 +360,13 @@ pub fn execute_action(
 
     let mut cmd = Command::new(&exe_to_run);
     for arg in &args_to_run {
-        cmd.arg(arg);
+        let clean = arg.trim();
+        let stripped = if clean.len() >= 2 && ((clean.starts_with('"') && clean.ends_with('"')) || (clean.starts_with('\'') && clean.ends_with('\''))) {
+            &clean[1..clean.len() - 1]
+        } else {
+            clean
+        };
+        cmd.arg(stripped);
     }
 
     let child = cmd

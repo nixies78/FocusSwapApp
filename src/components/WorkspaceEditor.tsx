@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import {
   Monitor,
   ChevronDown,
@@ -12,7 +13,7 @@ import {
   Plus,
   ArrowLeft,
 } from 'lucide-react';
-import { Action, CapturedLayout, MonitorInfo, Placement, Preset, SwitchAwayAction } from '../types';
+import { Action, CapturedLayout, MonitorInfo, Placement, Preset, SwitchAwayAction, ChromeProfile } from '../types';
 
 interface WorkspaceEditorProps {
   initialPreset?: Preset | null;
@@ -130,6 +131,13 @@ export default function WorkspaceEditor({
 
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [chromeProfiles, setChromeProfiles] = useState<ChromeProfile[]>([]);
+
+  useEffect(() => {
+    invoke<ChromeProfile[]>('get_chrome_profiles')
+      .then((profiles) => setChromeProfiles(profiles))
+      .catch((err) => console.error('Failed to load Chrome profiles:', err));
+  }, []);
 
   const toggleExpand = (index: number) => {
     setExpandedIndex((prev) => (prev === index ? null : index));
@@ -170,33 +178,87 @@ export default function WorkspaceEditor({
 
   const handleChromeAppToggle = (index: number, isChecked: boolean) => {
     const act = actions[index];
-    if (isChecked) {
-      let url = 'https://calendar.google.com';
-      for (const arg of act.args) {
-        if (arg.startsWith('--app=')) {
-          url = arg.substring(6).replace(/"/g, '');
-          break;
-        } else if (arg.startsWith('http')) {
-          url = arg;
-          break;
-        }
+    let url = '';
+    let profile = '';
+    for (const arg of act.args) {
+      if (arg.startsWith('--app=')) {
+        url = arg.substring(6).replace(/^["']|["']$/g, '');
+      } else if (arg.startsWith('http://') || arg.startsWith('https://')) {
+        url = arg.replace(/^["']|["']$/g, '');
+      } else if (arg.startsWith('--profile-directory=')) {
+        profile = arg.substring(20).replace(/^["']|["']$/g, '');
       }
-      handleUpdateAction(index, {
-        is_chrome_app: true,
-        args: [`--app=${url}`, '--new-window'],
-      });
-    } else {
-      handleUpdateAction(index, {
-        is_chrome_app: false,
-        args: act.args.filter((a) => !a.startsWith('--app=') && a !== '--new-window'),
-      });
     }
+    if (!url) {
+      url = 'https://calendar.google.com';
+    }
+
+    const newArgs: string[] = [];
+    if (profile) {
+      newArgs.push(`--profile-directory="${profile}"`);
+    }
+    if (isChecked) {
+      newArgs.push(`--app=${url}`, '--new-window');
+    } else {
+      newArgs.push('--new-window', url);
+    }
+
+    handleUpdateAction(index, {
+      is_chrome_app: isChecked,
+      args: newArgs,
+    });
   };
 
   const handleUrlChange = (index: number, newUrl: string) => {
+    const act = actions[index];
+    let profile = '';
+    for (const arg of act.args) {
+      if (arg.startsWith('--profile-directory=')) {
+        profile = arg.substring(20).replace(/^["']|["']$/g, '');
+      }
+    }
+
+    const newArgs: string[] = [];
+    if (profile) {
+      newArgs.push(`--profile-directory="${profile}"`);
+    }
+    if (act.is_chrome_app) {
+      newArgs.push(`--app=${newUrl}`, '--new-window');
+    } else {
+      newArgs.push('--new-window', newUrl);
+    }
+
     handleUpdateAction(index, {
-      is_chrome_app: true,
-      args: [`--app=${newUrl}`, '--new-window'],
+      args: newArgs,
+    });
+  };
+
+  const handleChromeProfileChange = (index: number, newProfile: string) => {
+    const act = actions[index];
+    let url = '';
+    for (const arg of act.args) {
+      if (arg.startsWith('--app=')) {
+        url = arg.substring(6).replace(/^["']|["']$/g, '');
+      } else if (arg.startsWith('http://') || arg.startsWith('https://')) {
+        url = arg.replace(/^["']|["']$/g, '');
+      }
+    }
+    if (!url) {
+      url = 'https://calendar.google.com';
+    }
+
+    const newArgs: string[] = [];
+    if (newProfile) {
+      newArgs.push(`--profile-directory="${newProfile}"`);
+    }
+    if (act.is_chrome_app) {
+      newArgs.push(`--app=${url}`, '--new-window');
+    } else {
+      newArgs.push('--new-window', url);
+    }
+
+    handleUpdateAction(index, {
+      args: newArgs,
     });
   };
 
@@ -276,13 +338,17 @@ export default function WorkspaceEditor({
       maximized: false,
     };
 
+    const isChrome = act.is_chrome_app || act.executable.toLowerCase().includes('chrome');
+
     let currentUrl = '';
-    if (act.is_chrome_app) {
-      for (const arg of act.args) {
-        if (arg.startsWith('--app=')) {
-          currentUrl = arg.substring(6).replace(/"/g, '');
-          break;
-        }
+    let currentProfile = '';
+    for (const arg of act.args) {
+      if (arg.startsWith('--app=')) {
+        currentUrl = arg.substring(6).replace(/^["']|["']$/g, '');
+      } else if (arg.startsWith('http://') || arg.startsWith('https://')) {
+        currentUrl = arg.replace(/^["']|["']$/g, '');
+      } else if (arg.startsWith('--profile-directory=')) {
+        currentProfile = arg.substring(20).replace(/^["']|["']$/g, '');
       }
     }
 
@@ -302,17 +368,21 @@ export default function WorkspaceEditor({
                 <span className="text-sm font-semibold text-slate-100 truncate">
                   {act.title || act.executable}
                 </span>
-                {act.is_chrome_app && (
+                {act.is_chrome_app ? (
                   <span className="text-[10px] font-mono bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 px-2 py-0.5 rounded-full">
                     Chrome Web App
                   </span>
-                )}
+                ) : isChrome ? (
+                  <span className="text-[10px] font-mono bg-slate-700/40 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full">
+                    Chrome Browser
+                  </span>
+                ) : null}
               </div>
               <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">
                 {act.executable}{' '}
                 {act.args.length > 0 && `(${act.args.join(' ')})`}
               </p>
-              {act.is_chrome_app && (
+              {isChrome && (
                 <div
                   className="mt-2 flex items-center space-x-2"
                   onClick={(e) => e.stopPropagation()}
@@ -324,9 +394,14 @@ export default function WorkspaceEditor({
                     type="text"
                     value={currentUrl}
                     onChange={(e) => handleUrlChange(index, e.target.value)}
-                    placeholder="https://www.youtube.com/feed/subscriptions"
+                    placeholder="https://calendar.google.com/calendar/u/1/r?tab=mc"
                     className="bg-slate-900/90 border border-slate-700/80 hover:border-cyan-500/60 focus:border-cyan-400 rounded px-2.5 py-1 text-slate-100 text-[11px] font-mono focus:outline-none w-full max-w-lg transition"
                   />
+                  {currentProfile && (
+                    <span className="text-[10px] font-mono bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded shrink-0">
+                      Profile: {currentProfile}
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -400,21 +475,41 @@ export default function WorkspaceEditor({
 
         {isExpanded && (
           <div className="p-4 border-t border-slate-800 bg-slate-900/50 space-y-4 text-xs animate-in fade-in duration-150">
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 space-y-2.5">
-              <label className="flex items-center space-x-2.5 cursor-pointer font-medium text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={!!act.is_chrome_app}
-                  onChange={(e) => handleChromeAppToggle(index, e.target.checked)}
-                  className="rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 w-4 h-4"
-                />
-                <span>Launch as isolated Chrome Application (App Mode)</span>
-              </label>
+            {isChrome && (
+              <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="flex items-center space-x-2.5 cursor-pointer font-medium text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={!!act.is_chrome_app}
+                      onChange={(e) => handleChromeAppToggle(index, e.target.checked)}
+                      className="rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 w-4 h-4"
+                    />
+                    <span>Launch as isolated Chrome Application (App Mode)</span>
+                  </label>
 
-              {act.is_chrome_app && (
-                <div className="pl-6 pt-1 space-y-1">
+                  {chromeProfiles.length > 0 && (
+                    <div className="flex items-center space-x-2">
+                      <span className="text-[11px] font-semibold text-slate-400">Chrome Profile:</span>
+                      <select
+                        value={currentProfile}
+                        onChange={(e) => handleChromeProfileChange(index, e.target.value)}
+                        className="bg-slate-900 border border-slate-700/80 rounded px-2.5 py-1 text-slate-100 text-xs focus:outline-none focus:border-cyan-500 font-mono"
+                      >
+                        <option value="">Default Profile</option>
+                        {chromeProfiles.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} {p.user_name ? `(${p.user_name})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-1 space-y-1">
                   <label className="block text-[11px] text-slate-400 font-mono">
-                    Web Application URL:
+                    Web Application / Page URL:
                   </label>
                   <input
                     type="text"
@@ -424,11 +519,22 @@ export default function WorkspaceEditor({
                     className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-slate-100 text-xs font-mono focus:outline-none focus:border-cyan-500"
                   />
                   <p className="text-[10px] text-slate-500">
-                    Will automatically format CLI arguments as: <span className="font-mono text-cyan-300">--app=&quot;{currentUrl || '&lt;URL&gt;'}&quot; --new-window</span>
+                    {act.is_chrome_app ? (
+                      <>
+                        Will open as an isolated window: <span className="font-mono text-cyan-300">--app=&quot;{currentUrl || '&lt;URL&gt;'}&quot; --new-window</span>
+                      </>
+                    ) : (
+                      <>
+                        Will open as a standard browser window: <span className="font-mono text-cyan-300">--new-window &quot;{currentUrl || '&lt;URL&gt;'}&quot;</span>
+                      </>
+                    )}
+                    {currentProfile && (
+                      <span className="ml-2 text-indigo-400 font-mono">--profile-directory=&quot;{currentProfile}&quot;</span>
+                    )}
                   </p>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-[11px] font-semibold text-slate-400 mb-1">

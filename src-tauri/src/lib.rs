@@ -167,6 +167,11 @@ fn set_autostart_enabled(enable: bool) -> Result<bool, String> {
     Ok(autostart::is_autostart_enabled())
 }
 
+#[tauri::command]
+fn get_chrome_profiles() -> Result<Vec<launcher::ChromeProfile>, String> {
+    Ok(launcher::detect_chrome_profiles())
+}
+
 pub fn run() {
     // Ensure working directory is always the application folder
     if let Ok(exe_path) = std::env::current_exe() {
@@ -334,6 +339,7 @@ pub fn run() {
             delete_preset,
             is_autostart_enabled,
             set_autostart_enabled,
+            get_chrome_profiles,
         ])
         .build(tauri::generate_context!())
         .map_err(|e| {
