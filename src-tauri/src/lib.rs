@@ -172,6 +172,30 @@ fn get_chrome_profiles() -> Result<Vec<launcher::ChromeProfile>, String> {
     Ok(launcher::detect_chrome_profiles())
 }
 
+#[tauri::command]
+fn update_and_restart(_app: AppHandle) -> Result<(), String> {
+    let exe_dir = if let Ok(exe_path) = std::env::current_exe() {
+        exe_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf()
+    } else {
+        std::path::PathBuf::from(".")
+    };
+
+    let script_path = exe_dir.join("update_and_restart.bat");
+    if !script_path.exists() {
+        let bat_content = "@echo off\r\ntitle FocusDeck Updater\r\ntaskkill /f /im FocusDeck.exe >nul 2>&1\r\ntimeout /t 1 /nobreak >nul\r\ncd /d \"%~dp0\"\r\ngit pull\r\nstart \"\" \"%~dp0FocusDeck.exe\"\r\nexit\r\n";
+        let _ = std::fs::write(&script_path, bat_content);
+    }
+
+    std::process::Command::new("cmd.exe")
+        .args(["/c", "start", "", script_path.to_str().unwrap_or("update_and_restart.bat")])
+        .current_dir(&exe_dir)
+        .spawn()
+        .map_err(|e| format!("Failed to launch updater: {}", e))?;
+
+    // Exit immediately so FocusDeck.exe is unlocked for git pull
+    std::process::exit(0);
+}
+
 pub fn run() {
     // Ensure working directory is always the application folder
     if let Ok(exe_path) = std::env::current_exe() {
@@ -340,6 +364,7 @@ pub fn run() {
             is_autostart_enabled,
             set_autostart_enabled,
             get_chrome_profiles,
+            update_and_restart,
         ])
         .build(tauri::generate_context!())
         .map_err(|e| {

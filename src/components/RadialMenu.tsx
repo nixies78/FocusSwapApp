@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { SlidersHorizontal, X, Monitor, Sparkles, Layers } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { SlidersHorizontal, X, Monitor, Sparkles, Layers, RefreshCw } from 'lucide-react';
 import { Preset } from '../types';
 
 interface RadialMenuProps {
@@ -29,6 +30,18 @@ export default function RadialMenu({
 }: RadialMenuProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [keyboardIndex, setKeyboardIndex] = useState<number>(0);
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleUpdateAndRestart = async () => {
+    if (isUpdating) return;
+    setIsUpdating(true);
+    try {
+      await invoke('update_and_restart');
+    } catch (err) {
+      console.error('Failed to trigger update and restart:', err);
+      setIsUpdating(false);
+    }
+  };
 
   const items = useMemo<RadialItem[]>(() => {
     const generalItem: RadialItem = {
@@ -194,6 +207,22 @@ export default function RadialMenu({
         data-backdrop="true"
         className="absolute w-[600px] h-[600px] rounded-full bg-indigo-600/10 blur-[120px] pointer-events-none"
       />
+
+      {/* Top Left Floating Controls - Sync / Update & Restart */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="absolute top-8 left-8 flex items-center gap-3 z-50"
+      >
+        <button
+          onClick={handleUpdateAndRestart}
+          disabled={isUpdating}
+          className="flex items-center gap-2.5 px-4 py-2.5 bg-slate-900/90 hover:bg-slate-800/95 text-slate-200 hover:text-white rounded-xl border border-slate-700/70 shadow-2xl backdrop-blur-xl transition-all duration-150 hover:border-cyan-500/50 hover:shadow-cyan-500/20 active:scale-95 group font-medium text-sm disabled:opacity-50 cursor-pointer"
+          title="Pull latest update from Git and restart FocusDeck"
+        >
+          <RefreshCw size={16} className={`text-cyan-400 ${isUpdating ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+          <span>{isUpdating ? 'Updating...' : 'Update & Restart'}</span>
+        </button>
+      </div>
 
       {/* Top Right Floating Controls */}
       <div
