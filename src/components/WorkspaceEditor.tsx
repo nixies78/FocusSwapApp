@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   Monitor,
@@ -21,6 +21,7 @@ interface WorkspaceEditorProps {
   initialPreset?: Preset | null;
   capturedLayout?: CapturedLayout | null;
   allPresets: Preset[];
+  defaultParentId?: string;
   onSave: (preset: Preset) => Promise<void>;
   onCancel: () => void;
 }
@@ -29,6 +30,7 @@ export default function WorkspaceEditor({
   initialPreset,
   capturedLayout,
   allPresets,
+  defaultParentId,
   onSave,
   onCancel,
 }: WorkspaceEditorProps) {
@@ -44,8 +46,18 @@ export default function WorkspaceEditor({
   const [shortcut, setShortcut] = useState(
     initialPreset?.shortcut || `${Math.min(9, allPresets.length + 1)}`
   );
+  const [parentId, setParentId] = useState<string | undefined>(
+    initialPreset?.parent_id || defaultParentId || undefined
+  );
   const [createDesktopShortcut, setCreateDesktopShortcut] = useState(false);
   const [moveExistingWindows, setMoveExistingWindows] = useState(true);
+
+  const availableParents = useMemo(() => {
+    // If current preset has children, it cannot be nested under another (1-level deep limit)
+    const hasChildren = allPresets.some((p) => p.parent_id === initialPreset?.id);
+    if (hasChildren) return [];
+    return allPresets.filter((p) => !p.parent_id && p.id !== initialPreset?.id);
+  }, [allPresets, initialPreset]);
 
   const [actions, setActions] = useState<Action[]>(() => {
     if (initialPreset) {
@@ -305,6 +317,7 @@ export default function WorkspaceEditor({
         id: presetId,
         name: name.trim(),
         shortcut: shortcut.trim(),
+        parent_id: parentId || undefined,
         actions,
       };
 
@@ -844,8 +857,8 @@ export default function WorkspaceEditor({
         </div>
 
         {/* Workspace Form Options */}
-        <div className="flex items-center justify-between gap-6 bg-slate-900/40 p-4 rounded-xl border border-slate-800/60">
-          <div className="flex-1">
+        <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/40 p-4 rounded-xl border border-slate-800/60">
+          <div className="flex-1 min-w-[200px]">
             <label className="block text-xs font-semibold text-slate-400 mb-1.5">
               Workspace name
             </label>
@@ -856,6 +869,24 @@ export default function WorkspaceEditor({
               placeholder="e.g. Daily Dev, Calendar & Notes..."
               className="w-full bg-slate-950/80 border border-slate-700/70 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-medium"
             />
+          </div>
+
+          <div className="w-56">
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+              Parent Workspace
+            </label>
+            <select
+              value={parentId || ''}
+              onChange={(e) => setParentId(e.target.value || undefined)}
+              className="w-full bg-slate-950/80 border border-slate-700/70 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-medium"
+            >
+              <option value="">None (Top-Level)</option>
+              {availableParents.map((p) => (
+                <option key={p.id} value={p.id}>
+                  ↳ {p.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="w-32">

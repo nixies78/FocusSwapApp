@@ -24,6 +24,7 @@ export interface Preset {
   name: string;
   shortcut: string;
   on_switch_away?: SwitchAwayAction;
+  parent_id?: string;
   actions: Action[];
 }
 

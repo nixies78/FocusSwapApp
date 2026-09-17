@@ -43,6 +43,8 @@ pub struct Preset {
     pub shortcut: String,
     #[serde(default = "default_on_switch_away")]
     pub on_switch_away: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
     pub actions: Vec<Action>,
 }
 
@@ -60,6 +62,7 @@ impl Default for WorkspaceConfig {
                     name: "Quick Calendar".to_string(),
                     shortcut: "1".to_string(),
                     on_switch_away: "nothing".to_string(),
+                    parent_id: None,
                     actions: vec![Action {
                         action_type: "launch".to_string(),
                         executable: "chrome.exe".to_string(),
@@ -85,6 +88,7 @@ impl Default for WorkspaceConfig {
                     name: "Scratchpad & Docs".to_string(),
                     shortcut: "2".to_string(),
                     on_switch_away: "nothing".to_string(),
+                    parent_id: None,
                     actions: vec![Action {
                         action_type: "launch".to_string(),
                         executable: "notepad.exe".to_string(),
@@ -107,6 +111,7 @@ impl Default for WorkspaceConfig {
                     name: "Notion Workspace".to_string(),
                     shortcut: "3".to_string(),
                     on_switch_away: "nothing".to_string(),
+                    parent_id: None,
                     actions: vec![Action {
                         action_type: "launch".to_string(),
                         executable: "chrome.exe".to_string(),
@@ -232,6 +237,11 @@ pub fn save_presets(presets: Vec<Preset>) -> Result<(), String> {
 pub fn delete_preset(preset_id: &str) -> Result<Vec<Preset>, String> {
     let mut config = load_config()?;
     config.presets.retain(|p| p.id != preset_id);
+    for p in &mut config.presets {
+        if p.parent_id.as_deref() == Some(preset_id) {
+            p.parent_id = None;
+        }
+    }
     save_config(&config)?;
     Ok(config.presets)
 }

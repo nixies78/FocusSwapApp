@@ -12,6 +12,7 @@ import {
   Terminal,
   Layers,
   Sparkles,
+  Folder,
 } from 'lucide-react';
 import { Action, CapturedLayout, Preset } from '../types';
 import SnapshotCreatorModal from './SnapshotCreatorModal';
@@ -21,7 +22,7 @@ interface WorkspacesManagerProps {
   onLaunch: (preset: Preset) => void;
   onSwitchToGeneral: () => void;
   onEdit: (preset: Preset) => void;
-  onCreateNew: (capturedLayout?: CapturedLayout) => void;
+  onCreateNew: (capturedLayout?: CapturedLayout, parentId?: string) => void;
   onDelete: (presetId: string) => Promise<void>;
   onBackToLauncher: () => void;
 }
@@ -38,6 +39,7 @@ export default function WorkspacesManager({
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'shortcut'>('name');
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
+  const [targetParentId, setTargetParentId] = useState<string | undefined>(undefined);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [autostart, setAutostart] = useState<boolean>(false);
   const [loadingAutostart, setLoadingAutostart] = useState<boolean>(false);
@@ -61,7 +63,7 @@ export default function WorkspacesManager({
     }
   };
 
-  const filteredPresets = useMemo(() => {
+  const { topLevelPresets, childrenMap, orphanChildren, totalMatchingCount } = useMemo(() => {
     let list = [...presets];
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -76,12 +78,41 @@ export default function WorkspacesManager({
           )
       );
     }
-    if (sortBy === 'name') {
-      list.sort((a, b) => a.name.localeCompare(b.name));
-    } else {
-      list.sort((a, b) => a.shortcut.localeCompare(b.shortcut));
+
+    const children = new Map<string, Preset[]>();
+    for (const p of presets) {
+      if (p.parent_id) {
+        const arr = children.get(p.parent_id) || [];
+        arr.push(p);
+        children.set(p.parent_id, arr);
+      }
     }
-    return list;
+
+    const matchingIds = new Set(list.map((p) => p.id));
+    const topLevel = presets.filter(
+      (p) =>
+        !p.parent_id &&
+        (matchingIds.has(p.id) ||
+          (children.get(p.id) || []).some((c) => matchingIds.has(c.id)))
+    );
+
+    if (sortBy === 'name') {
+      topLevel.sort((a, b) => a.name.localeCompare(b.name));
+    } else {
+      topLevel.sort((a, b) => a.shortcut.localeCompare(b.shortcut));
+    }
+
+    const topLevelIds = new Set(presets.filter((p) => !p.parent_id).map((p) => p.id));
+    const orphans = presets.filter(
+      (p) => p.parent_id && !topLevelIds.has(p.parent_id) && matchingIds.has(p.id)
+    );
+
+    return {
+      topLevelPresets: topLevel,
+      childrenMap: children,
+      orphanChildren: orphans,
+      totalMatchingCount: list.length,
+    };
   }, [presets, searchQuery, sortBy]);
 
   const handleDelete = async (presetId: string) => {
@@ -103,6 +134,9 @@ export default function WorkspacesManager({
     }
     if (exe.includes('notepad') || exe.includes('code')) {
       return <FileText className="w-4 h-4 text-amber-400" />;
+    }
+    if (exe.includes('explorer')) {
+      return <Folder className="w-4 h-4 text-amber-400" />;
     }
     return <Layers className="w-4 h-4 text-indigo-400" />;
   };
@@ -153,8 +187,11 @@ export default function WorkspacesManager({
           </button>
 
           <button
-            onClick={() => setIsSnapshotModalOpen(true)}
-            className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition shadow-sm"
+            onClick={() => {
+              setTargetParentId(undefined);
+              setIsSnapshotModalOpen(true);
+            }}
+            className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition shadow-sm cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Create Workspace</span>
@@ -220,7 +257,7 @@ export default function WorkspacesManager({
           </div>
         </div>
 
-        {filteredPresets.length === 0 ? (
+        {totalMatchingCount === 0 ? (
           <div className="py-16 text-center text-slate-500 flex flex-col items-center">
             <Sparkles className="w-8 h-8 text-slate-600 mb-2" />
             <p className="text-sm font-medium text-slate-400">No workspaces found</p>
@@ -229,99 +266,236 @@ export default function WorkspacesManager({
             </p>
           </div>
         ) : (
-          filteredPresets.map((preset) => (
-            <div
-              key={preset.id}
-              className="group bg-[#181824] hover:bg-[#1f1f2e] border border-slate-800/80 hover:border-slate-700 rounded-xl p-4 transition flex items-center justify-between shadow-sm"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center space-x-2.5">
-                  <h3 className="text-sm font-bold text-slate-100 tracking-wide truncate">
-                    {preset.name}
-                  </h3>
-                  {preset.shortcut && (
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                      Key {preset.shortcut}
-                    </span>
+          <div className="space-y-4">
+            {topLevelPresets.map((preset) => {
+              const children = childrenMap.get(preset.id) || [];
+
+              return (
+                <div key={preset.id} className="space-y-2">
+                  {/* Master / Top-Level Workspace Card */}
+                  <div className="group bg-[#181824] hover:bg-[#1f1f2e] border border-slate-800/80 hover:border-slate-700 rounded-xl p-4 transition flex items-center justify-between shadow-sm">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center space-x-2.5">
+                        <h3 className="text-sm font-bold text-slate-100 tracking-wide truncate">
+                          {preset.name}
+                        </h3>
+                        {preset.shortcut && (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                            Key {preset.shortcut}
+                          </span>
+                        )}
+                        {children.length > 0 && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                            {children.length} {children.length === 1 ? 'sub-workspace' : 'sub-workspaces'}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Apps preview row */}
+                      <div className="flex items-center space-x-2 flex-wrap gap-1.5 mt-2">
+                        {preset.actions.map((act, actIdx) => (
+                          <div
+                            key={actIdx}
+                            className="flex items-center space-x-1.5 px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 shadow-sm text-xs"
+                            title={act.title || act.executable}
+                          >
+                            {getActionIcon(act)}
+                            <span className="text-[11px] font-mono text-slate-300 truncate max-w-[130px]">
+                              {act.title || act.executable}
+                            </span>
+                            {act.on_switch_away && act.on_switch_away !== 'nothing' && (
+                              <span
+                                className={`text-[9px] font-mono px-1 rounded border ${
+                                  act.on_switch_away === 'temp_minimize'
+                                    ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                                    : act.on_switch_away === 'minimize'
+                                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                    : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                                }`}
+                              >
+                                {act.on_switch_away === 'temp_minimize'
+                                  ? 'Temp Minimise'
+                                  : act.on_switch_away === 'minimize'
+                                  ? 'Minimise'
+                                  : 'Kill'}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                        <span className="text-xs text-slate-500 font-medium ml-1">
+                          ({preset.actions.length} {preset.actions.length === 1 ? 'app' : 'apps'})
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex items-center space-x-2 shrink-0 pl-4">
+                      <button
+                        onClick={() => {
+                          setTargetParentId(preset.id);
+                          setIsSnapshotModalOpen(true);
+                        }}
+                        className="flex items-center space-x-1 px-2.5 py-1.5 bg-slate-800/90 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-lg text-xs font-medium transition border border-indigo-500/20 cursor-pointer"
+                        title={`Add a sub-workspace nested under ${preset.name}`}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Sub-workspace</span>
+                      </button>
+
+                      <button
+                        onClick={() => onLaunch(preset)}
+                        className="flex items-center space-x-1 px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg text-xs font-medium transition border border-indigo-500/30 cursor-pointer"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        <span>Launch</span>
+                      </button>
+
+                      <button
+                        onClick={() => onEdit(preset)}
+                        className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg border border-slate-700/60 transition cursor-pointer"
+                        title="Edit Workspace"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => handleDelete(preset.id)}
+                        disabled={deletingId === preset.id}
+                        className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg border border-slate-700/60 transition disabled:opacity-50 cursor-pointer"
+                        title="Delete Workspace"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Nested Sub-Workspaces Branch */}
+                  {children.length > 0 && (
+                    <div className="ml-6 pl-4 border-l-2 border-indigo-500/30 space-y-2 py-1">
+                      {children.map((child) => (
+                        <div
+                          key={child.id}
+                          className="group bg-[#141422] hover:bg-[#1b1b2a] border border-slate-800/80 hover:border-slate-700/80 rounded-xl p-3 transition flex items-center justify-between shadow-sm"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center space-x-2">
+                              <span className="text-indigo-400 font-bold text-xs">↳</span>
+                              <h4 className="text-xs font-bold text-slate-200 tracking-wide truncate">
+                                {child.name}
+                              </h4>
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                                Sub-workspace
+                              </span>
+                            </div>
+
+                            {/* Child Apps preview row */}
+                            <div className="flex items-center space-x-2 flex-wrap gap-1.5 mt-1.5">
+                              {child.actions.map((act, actIdx) => (
+                                <div
+                                  key={actIdx}
+                                  className="flex items-center space-x-1.5 px-2 py-0.5 rounded-md bg-slate-900/90 border border-slate-800/90 shadow-sm text-xs"
+                                  title={act.title || act.executable}
+                                >
+                                  {getActionIcon(act)}
+                                  <span className="text-[11px] font-mono text-slate-300 truncate max-w-[120px]">
+                                    {act.title || act.executable}
+                                  </span>
+                                </div>
+                              ))}
+                              <span className="text-[11px] text-slate-500 font-medium ml-1">
+                                ({child.actions.length} {child.actions.length === 1 ? 'app' : 'apps'})
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Child Action Buttons */}
+                          <div className="flex items-center space-x-2 shrink-0 pl-3">
+                            <button
+                              onClick={() => onLaunch(child)}
+                              className="flex items-center space-x-1 px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg text-xs font-medium transition border border-indigo-500/30 cursor-pointer"
+                            >
+                              <Play className="w-3 h-3" />
+                              <span>Launch</span>
+                            </button>
+
+                            <button
+                              onClick={() => onEdit(child)}
+                              className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg border border-slate-700/60 transition cursor-pointer"
+                              title="Edit Sub-workspace"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+
+                            <button
+                              onClick={() => handleDelete(child.id)}
+                              disabled={deletingId === child.id}
+                              className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg border border-slate-700/60 transition disabled:opacity-50 cursor-pointer"
+                              title="Delete Sub-workspace"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
+              );
+            })}
 
-                {/* Apps preview row */}
-                <div className="flex items-center space-x-2 flex-wrap gap-1.5 mt-2">
-                  {preset.actions.map((act, actIdx) => (
-                    <div
-                      key={actIdx}
-                      className="flex items-center space-x-1.5 px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 shadow-sm text-xs"
-                      title={act.title || act.executable}
-                    >
-                      {getActionIcon(act)}
-                      <span className="text-[11px] font-mono text-slate-300 truncate max-w-[130px]">
-                        {act.title || act.executable}
-                      </span>
-                      {act.on_switch_away && act.on_switch_away !== 'nothing' && (
-                        <span
-                          className={`text-[9px] font-mono px-1 rounded border ${
-                            act.on_switch_away === 'temp_minimize'
-                              ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
-                              : act.on_switch_away === 'minimize'
-                              ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                              : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
-                          }`}
-                        >
-                          {act.on_switch_away === 'temp_minimize'
-                            ? 'Temp Minimise'
-                            : act.on_switch_away === 'minimize'
-                            ? 'Minimise'
-                            : 'Kill'}
-                        </span>
-                      )}
+            {/* Orphan Children (if any) */}
+            {orphanChildren.length > 0 && (
+              <div className="space-y-2 pt-2">
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                  Independent Sub-workspaces
+                </span>
+                {orphanChildren.map((orphan) => (
+                  <div
+                    key={orphan.id}
+                    className="group bg-[#141422] border border-slate-800/80 rounded-xl p-3 transition flex items-center justify-between"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <h4 className="text-xs font-bold text-slate-200">{orphan.name}</h4>
                     </div>
-                  ))}
-                  <span className="text-xs text-slate-500 font-medium ml-1">
-                    ({preset.actions.length} {preset.actions.length === 1 ? 'app' : 'apps'})
-                  </span>
-                </div>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => onLaunch(orphan)}
+                        className="px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 rounded-lg text-xs font-medium"
+                      >
+                        Launch
+                      </button>
+                      <button
+                        onClick={() => onEdit(orphan)}
+                        className="p-1 text-slate-400 hover:text-white"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(orphan.id)}
+                        className="p-1 text-slate-400 hover:text-rose-400"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center space-x-2 shrink-0 pl-4">
-                <button
-                  onClick={() => onLaunch(preset)}
-                  className="flex items-center space-x-1 px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg text-xs font-medium transition border border-indigo-500/30"
-                >
-                  <Play className="w-3.5 h-3.5" />
-                  <span>Launch</span>
-                </button>
-
-                <button
-                  onClick={() => onEdit(preset)}
-                  className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg border border-slate-700/60 transition"
-                  title="Edit Workspace"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-
-                <button
-                  onClick={() => handleDelete(preset.id)}
-                  disabled={deletingId === preset.id}
-                  className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg border border-slate-700/60 transition disabled:opacity-50"
-                  title="Delete Workspace"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          ))
+            )}
+          </div>
         )}
       </div>
 
       {/* Snapshot Creator Modal */}
       <SnapshotCreatorModal
         isOpen={isSnapshotModalOpen}
-        onClose={() => setIsSnapshotModalOpen(false)}
+        onClose={() => {
+          setIsSnapshotModalOpen(false);
+          setTargetParentId(undefined);
+        }}
         onCaptured={(layout) => {
           setIsSnapshotModalOpen(false);
-          onCreateNew(layout);
+          onCreateNew(layout, targetParentId);
+          setTargetParentId(undefined);
         }}
       />
     </div>

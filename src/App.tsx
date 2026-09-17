@@ -113,15 +113,19 @@ export default function App() {
     }
   };
 
-  const handleCreateNew = (layout?: CapturedLayout) => {
+  const [defaultParentId, setDefaultParentId] = useState<string | undefined>(undefined);
+
+  const handleCreateNew = (layout?: CapturedLayout, parentId?: string) => {
     setCapturedLayout(layout || null);
     setEditingPreset(null);
+    setDefaultParentId(parentId);
     setView('editor');
   };
 
   const handleEdit = (preset: Preset) => {
     setEditingPreset(preset);
     setCapturedLayout(null);
+    setDefaultParentId(preset.parent_id);
     setView('editor');
   };
 
@@ -162,6 +166,7 @@ export default function App() {
           initialPreset={editingPreset}
           capturedLayout={capturedLayout}
           allPresets={presets}
+          defaultParentId={defaultParentId}
           onSave={handleSavePreset}
           onCancel={() => setView('manager')}
         />
