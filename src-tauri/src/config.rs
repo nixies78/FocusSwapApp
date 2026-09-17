@@ -133,27 +133,54 @@ impl Default for WorkspaceConfig {
 }
 
 pub fn get_config_path() -> PathBuf {
-    // 1. Check if workspaces.json exists in the current working directory
-    let local_path = PathBuf::from("workspaces.json");
+    // 1. Check if workspaces.local.json exists in the current working directory
+    let local_path = PathBuf::from("workspaces.local.json");
     if local_path.exists() {
         return local_path;
     }
 
-    // 2. Check next to the executable
+    // 2. If template workspaces.json exists, initialize workspaces.local.json from it
+    let template_path = PathBuf::from("workspaces.json");
+    if template_path.exists() {
+        let _ = fs::copy(&template_path, &local_path);
+        if local_path.exists() {
+            return local_path;
+        }
+        return template_path;
+    }
+
+    // 3. Check next to the executable
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            let next_to_exe = exe_dir.join("workspaces.json");
-            if next_to_exe.exists() {
-                return next_to_exe;
+            let next_to_exe_local = exe_dir.join("workspaces.local.json");
+            if next_to_exe_local.exists() {
+                return next_to_exe_local;
+            }
+            let next_to_exe_template = exe_dir.join("workspaces.json");
+            if next_to_exe_template.exists() {
+                let _ = fs::copy(&next_to_exe_template, &next_to_exe_local);
+                if next_to_exe_local.exists() {
+                    return next_to_exe_local;
+                }
+                return next_to_exe_template;
             }
         }
     }
 
-    // 3. Fallback to AppData/FocusDeck/workspaces.json
+    // 4. Fallback to AppData/FocusDeck/workspaces.local.json
     if let Some(config_dir) = dirs::config_dir() {
         let app_dir = config_dir.join("FocusDeck");
         let _ = fs::create_dir_all(&app_dir);
-        return app_dir.join("workspaces.json");
+        let app_data_local = app_dir.join("workspaces.local.json");
+        if app_data_local.exists() {
+            return app_data_local;
+        }
+        let app_data_template = app_dir.join("workspaces.json");
+        if app_data_template.exists() {
+            let _ = fs::copy(&app_data_template, &app_data_local);
+            return app_data_local;
+        }
+        return app_data_local;
     }
 
     local_path
@@ -184,20 +211,14 @@ pub fn save_config(config: &WorkspaceConfig) -> Result<(), String> {
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
     let _ = fs::write(&path, &contents);
 
-    // Also sync to AppData
+    // Also sync to AppData for backup
     if let Some(config_dir) = dirs::config_dir() {
         let app_dir = config_dir.join("FocusDeck");
         let _ = fs::create_dir_all(&app_dir);
-        let app_data_path = app_dir.join("workspaces.json");
+        let app_data_path = app_dir.join("workspaces.local.json");
         if app_data_path != path {
             let _ = fs::write(&app_data_path, &contents);
         }
-    }
-
-    // Also sync to root workspaces.json
-    let root_path = PathBuf::from("workspaces.json");
-    if root_path != path {
-        let _ = fs::write(&root_path, &contents);
     }
 
     Ok(())

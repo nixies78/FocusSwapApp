@@ -242,7 +242,7 @@ pub fn run() {
                 autostart::is_autostart_enabled(),
                 None::<&str>,
             )?;
-            let config_item = MenuItem::with_id(app, "config", "Open workspaces.json", true, None::<&str>)?;
+            let config_item = MenuItem::with_id(app, "config", "Open Workspaces Config", true, None::<&str>)?;
             let reload_item = MenuItem::with_id(app, "reload", "Reload Configuration", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit FocusDeck", true, None::<&str>)?;
 

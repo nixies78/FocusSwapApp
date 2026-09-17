@@ -1,6 +1,10 @@
 # Logs
 *.log
 
+# Machine-specific local configuration (prevents overwriting across computers)
+workspaces.local.json
+*.local.json
+
 # Python
 __pycache__/
 *.py[cod]
