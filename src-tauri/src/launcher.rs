@@ -222,16 +222,18 @@ pub fn get_title_keyword(action: &Action) -> Option<String> {
 
     let exe_lower = action.executable.to_lowercase();
     if exe_lower.contains("explorer") {
-        if let Some(arg) = action.args.first() {
-            let clean = arg.trim().trim_matches('"');
-            if !clean.is_empty() {
-                let p = Path::new(clean);
-                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                    if !name.is_empty() {
-                        return Some(name.to_string());
-                    }
-                }
+        let raw_target = action.args.first().map(|s| s.as_str()).unwrap_or_else(|| {
+            action.title.as_deref().unwrap_or("")
+        });
+        let resolved = crate::win32_layout::resolve_folder_path(raw_target);
+        let p = Path::new(&resolved);
+        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+            if !name.is_empty() {
+                return Some(name.to_string());
             }
+        }
+        if !resolved.is_empty() {
+            return Some(resolved);
         }
     }
 
@@ -351,6 +353,16 @@ pub fn execute_action(
         if title_check.contains("calc") {
             exe_to_run = "calc.exe".to_string();
         }
+    }
+
+    // Check if launching File Explorer
+    let is_explorer = exe_to_run.to_lowercase().contains("explorer");
+    if is_explorer {
+        let raw_target = args_to_run.first().cloned().unwrap_or_else(|| {
+            action.title.clone().unwrap_or_default()
+        });
+        let resolved = crate::win32_layout::resolve_folder_path(&raw_target);
+        args_to_run = vec![resolved];
     }
 
     // Check if launching Chrome / Web App

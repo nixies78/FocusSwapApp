@@ -163,7 +163,7 @@ unsafe extern "system" fn capture_windows_callback(hwnd: HWND, lparam: LPARAM) -
     if copied <= 0 {
         return BOOL(1);
     }
-    let title = String::from_utf16_lossy(&buf[..copied as usize]).trim().to_string();
+    let mut title = String::from_utf16_lossy(&buf[..copied as usize]).trim().to_string();
 
     // Ignore shell and system overlays
     let title_lower = title.to_lowercase();
@@ -292,41 +292,13 @@ unsafe extern "system" fn capture_windows_callback(hwnd: HWND, lparam: LPARAM) -
             suggested_url = Some("https://chatgpt.com".to_string());
         }
     } else if is_file_explorer {
-        let user_profile = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".to_string());
-        let t_clean = title.trim();
-        let t_lower = t_clean.to_lowercase();
-
-        let folder_path = match t_lower.as_str() {
-            "downloads" => Some(format!("{}\\Downloads", user_profile)),
-            "documents" => Some(format!("{}\\Documents", user_profile)),
-            "pictures" => Some(format!("{}\\Pictures", user_profile)),
-            "desktop" => Some(format!("{}\\Desktop", user_profile)),
-            "music" => Some(format!("{}\\Music", user_profile)),
-            "videos" => Some(format!("{}\\Videos", user_profile)),
-            "home" | "this pc" => Some("shell:MyComputerFolder".to_string()),
-            _ => {
-                if Path::new(t_clean).exists() {
-                    Some(t_clean.to_string())
-                } else {
-                    let sub = format!("{}\\{}", user_profile, t_clean);
-                    if Path::new(&sub).exists() {
-                        Some(sub)
-                    } else {
-                        let mut found = None;
-                        for drive in ['C', 'D', 'E', 'F'] {
-                            let cand = format!("{}:\\{}", drive, t_clean);
-                            if Path::new(&cand).exists() {
-                                found = Some(cand);
-                                break;
-                            }
-                        }
-                        found.or_else(|| Some(t_clean.to_string()))
-                    }
-                }
-            }
-        };
-
-        suggested_url = folder_path;
+        let resolved = resolve_folder_path(&title);
+        if let Some(pos) = title.find(" - File Explorer") {
+            title = title[..pos].trim().to_string();
+        } else if let Some(pos) = title.find(" - Windows Explorer") {
+            title = title[..pos].trim().to_string();
+        }
+        suggested_url = Some(resolved);
     }
 
     let id = format!("{}_{}", exe_name, process_id);
@@ -547,3 +519,113 @@ pub fn force_foreground_window(hwnd: HWND) {
         let _ = SetForegroundWindow(hwnd);
     }
 }
+
+/// Helper to resolve File Explorer folder paths from window titles or user inputs.
+/// Windows 11 window titles often look like "Downloads - File Explorer" or "FocusSwapApp - File Explorer".
+pub fn resolve_folder_path(raw: &str) -> String {
+    let mut clean = raw.trim().trim_matches('"').trim_matches('\'').trim();
+
+    // Strip " - File Explorer" or " - Windows Explorer" suffix
+    if let Some(pos) = clean.to_lowercase().find(" - file explorer") {
+        clean = clean[..pos].trim();
+    } else if let Some(pos) = clean.to_lowercase().find(" - windows explorer") {
+        clean = clean[..pos].trim();
+    }
+
+    if clean.is_empty() {
+        return dirs::download_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "shell:MyComputerFolder".to_string());
+    }
+
+    // If it's a CLI switch like /select,... return as is
+    if clean.starts_with('/') || clean.starts_with('-') {
+        return clean.to_string();
+    }
+
+    // Check if it's already a valid path that exists
+    let p = Path::new(clean);
+    if p.is_absolute() && p.exists() {
+        return clean.to_string();
+    }
+
+    let lower = clean.to_lowercase();
+
+    // Match known standard folders
+    match lower.as_str() {
+        "downloads" => {
+            if let Some(d) = dirs::download_dir() {
+                return d.to_string_lossy().to_string();
+            }
+        }
+        "documents" | "my documents" => {
+            if let Some(d) = dirs::document_dir() {
+                return d.to_string_lossy().to_string();
+            }
+        }
+        "pictures" | "my pictures" => {
+            if let Some(d) = dirs::picture_dir() {
+                return d.to_string_lossy().to_string();
+            }
+        }
+        "desktop" => {
+            if let Some(d) = dirs::desktop_dir() {
+                return d.to_string_lossy().to_string();
+            }
+        }
+        "music" | "my music" => {
+            if let Some(d) = dirs::audio_dir() {
+                return d.to_string_lossy().to_string();
+            }
+        }
+        "videos" | "my videos" => {
+            if let Some(d) = dirs::video_dir() {
+                return d.to_string_lossy().to_string();
+            }
+        }
+        "home" | "this pc" => {
+            return "shell:MyComputerFolder".to_string();
+        }
+        _ => {}
+    }
+
+    let user_profile = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".to_string());
+
+    if lower == "onedrive" {
+        let onedrive_path = format!("{}\\OneDrive", user_profile);
+        if Path::new(&onedrive_path).exists() {
+            return onedrive_path;
+        }
+    }
+
+    if lower.contains("(c:)") || lower == "c:" || lower == "c" {
+        return "C:\\".to_string();
+    }
+    if lower.contains("(d:)") || lower == "d:" || lower == "d" {
+        return "D:\\".to_string();
+    }
+    if lower.contains("(e:)") || lower == "e:" || lower == "e" {
+        return "E:\\".to_string();
+    }
+
+    // Try common candidates
+    let candidates = [
+        format!("{}\\{}", user_profile, clean),
+        format!("{}\\Downloads\\{}", user_profile, clean),
+        format!("{}\\Documents\\{}", user_profile, clean),
+        format!("{}\\Desktop\\{}", user_profile, clean),
+        format!("{}\\Pictures\\{}", user_profile, clean),
+        format!("C:\\{}", clean),
+        format!("D:\\{}", clean),
+        format!("E:\\{}", clean),
+    ];
+
+    for cand in &candidates {
+        if Path::new(cand).exists() {
+            return cand.clone();
+        }
+    }
+
+    clean.to_string()
+}
+

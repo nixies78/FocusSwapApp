@@ -61,7 +61,17 @@ export default function WorkspaceEditor({
 
   const [actions, setActions] = useState<Action[]>(() => {
     if (initialPreset) {
-      return initialPreset.actions;
+      return initialPreset.actions.map((act) => {
+        const isExp = act.executable.toLowerCase().includes('explorer');
+        if (isExp && act.args && act.args.length > 0) {
+          const cleanArg = act.args[0]
+            .replace(/\s*-\s*File Explorer$/i, '')
+            .replace(/\s*-\s*Windows Explorer$/i, '')
+            .trim();
+          return { ...act, args: [cleanArg, ...act.args.slice(1)] };
+        }
+        return act;
+      });
     }
     if (capturedLayout && capturedLayout.windows.length > 0) {
       return capturedLayout.windows.map((w) => {
@@ -612,15 +622,31 @@ export default function WorkspaceEditor({
                 </label>
                 <input
                   type="text"
-                  value={act.args[0] || ''}
+                  value={(act.args[0] || '').replace(/\s*-\s*File Explorer$/i, '').replace(/\s*-\s*Windows Explorer$/i, '')}
                   onChange={(e) => {
-                    handleUpdateAction(index, { args: [e.target.value] });
+                    const clean = e.target.value
+                      .replace(/\s*-\s*File Explorer$/i, '')
+                      .replace(/\s*-\s*Windows Explorer$/i, '');
+                    handleUpdateAction(index, { args: [clean] });
                   }}
-                  placeholder="e.g. C:\Users\User\Downloads"
+                  placeholder="e.g. Downloads or C:\Users\User\Downloads"
                   className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-slate-100 text-xs font-mono focus:outline-none focus:border-amber-500"
                 />
+                <div className="flex items-center space-x-1.5 flex-wrap gap-1 pt-0.5">
+                  <span className="text-[10px] text-slate-500 font-medium">Quick folders:</span>
+                  {['Downloads', 'Documents', 'Desktop', 'Pictures', 'C:\\'].map((folder) => (
+                    <button
+                      key={folder}
+                      type="button"
+                      onClick={() => handleUpdateAction(index, { args: [folder] })}
+                      className="px-2 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:text-white transition cursor-pointer"
+                    >
+                      {folder}
+                    </button>
+                  ))}
+                </div>
                 <p className="text-[10px] text-slate-500">
-                  Will open in File Explorer: <span className="font-mono text-amber-300">explorer.exe &quot;{act.args[0] || '&lt;Folder Path&gt;'}&quot;</span>
+                  Will open in File Explorer: <span className="font-mono text-amber-300">explorer.exe &quot;{(act.args[0] || '').replace(/\s*-\s*File Explorer$/i, '').replace(/\s*-\s*Windows Explorer$/i, '') || '&lt;Folder Path&gt;'}&quot;</span>
                 </p>
               </div>
             )}
