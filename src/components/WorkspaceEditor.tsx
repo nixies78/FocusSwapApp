@@ -12,6 +12,7 @@ import {
   Trash2,
   Plus,
   ArrowLeft,
+  X,
 } from 'lucide-react';
 import { Action, CapturedLayout, MonitorInfo, Placement, Preset, SwitchAwayAction, ChromeProfile } from '../types';
 
@@ -715,9 +716,9 @@ export default function WorkspaceEditor({
         <div className="bg-[#181824] border border-slate-800/90 rounded-xl p-5 flex flex-col items-center">
           <div className="flex items-center space-x-4 w-full max-w-3xl justify-center">
             {monitors.map((m) => {
-              const screenApps = actions.filter(
-                (a) => (a.placement?.screen || 1) === m.index
-              );
+              const screenApps = actions
+                .map((act, originalIndex) => ({ act, originalIndex }))
+                .filter(({ act }) => (act.placement?.screen || 1) === m.index);
               return (
                 <div
                   key={m.index}
@@ -737,16 +738,27 @@ export default function WorkspaceEditor({
                     {screenApps.length === 0 ? (
                       <span className="text-[11px] text-slate-500 italic">No apps assigned</span>
                     ) : (
-                      screenApps.map((act, i) => (
+                      screenApps.map(({ act, originalIndex }) => (
                         <div
-                          key={i}
-                          className="flex items-center space-x-1.5 bg-slate-900/90 px-2.5 py-1.5 rounded-lg border border-slate-700/60 shadow-sm"
+                          key={originalIndex}
+                          className="group flex items-center space-x-1.5 bg-slate-900/90 pl-2.5 pr-1.5 py-1 rounded-lg border border-slate-700/60 hover:border-slate-600 shadow-sm transition"
                           title={act.title || act.executable}
                         >
                           {getAppIcon(act)}
                           <span className="text-xs font-medium text-slate-200 truncate max-w-[100px]">
                             {act.title || act.executable}
                           </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveAction(originalIndex);
+                            }}
+                            className="p-0.5 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 transition cursor-pointer"
+                            title="Remove application"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       ))
                     )}
