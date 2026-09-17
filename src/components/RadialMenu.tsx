@@ -1,13 +1,13 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { SlidersHorizontal, X, Monitor, Sparkles, Layers, RefreshCw, Folder } from 'lucide-react';
+import { SlidersHorizontal, X, Sparkles, Layers, RefreshCw, Folder } from 'lucide-react';
 import { Preset } from '../types';
 
 interface RadialMenuProps {
   presets: Preset[];
   activeSessionId: string | null;
   onSelectPreset: (preset: Preset) => void;
-  onSelectGeneral: () => void;
+  onSelectGeneral?: () => void;
   onOpenManager: () => void;
   onClose: () => void;
 }
@@ -30,7 +30,6 @@ export default function RadialMenu({
   presets,
   activeSessionId,
   onSelectPreset,
-  onSelectGeneral,
   onOpenManager,
   onClose,
 }: RadialMenuProps) {
@@ -63,14 +62,6 @@ export default function RadialMenu({
       }
     }
 
-    const generalItem: RadialItem = {
-      id: '__general__',
-      name: 'General Desktop',
-      shortcut: '0',
-      isGeneral: true,
-      children: [],
-    };
-
     const workspaceItems: RadialItem[] = topLevelPresets.map((p, idx) => ({
       id: p.id,
       name: p.name,
@@ -80,20 +71,18 @@ export default function RadialMenu({
       children: childrenMap.get(p.id) || [],
     }));
 
-    return [generalItem, ...workspaceItems];
+    return workspaceItems;
   }, [presets]);
 
   const total = items.length;
 
   const handleExecuteMain = useCallback(
     (item: RadialItem) => {
-      if (item.isGeneral) {
-        onSelectGeneral();
-      } else if (item.preset) {
+      if (item.preset) {
         onSelectPreset(item.preset);
       }
     },
-    [onSelectGeneral, onSelectPreset]
+    [onSelectPreset]
   );
 
   const handleExecuteChild = useCallback(
@@ -217,9 +206,7 @@ export default function RadialMenu({
       const textX = center + textR * Math.cos(radMid);
       const textY = center + textR * Math.sin(radMid);
 
-      const isActiveSession = item.isGeneral
-        ? activeSessionId === null
-        : activeSessionId === item.id;
+      const isActiveSession = activeSessionId === item.id;
 
       // Calculate outer sub-workspace slices (if any)
       const childSlices = (item.children || []).map((child, cIdx, arr) => {
@@ -316,6 +303,9 @@ export default function RadialMenu({
       if (hoverTarget.type === 'main') {
         const item = items[hoverTarget.index];
         if (item) {
+          const isFolder = item.preset?.actions.some((a) =>
+            a.executable.toLowerCase().includes('explorer')
+          ) || false;
           return {
             title: item.name,
             subtitle:
@@ -323,8 +313,7 @@ export default function RadialMenu({
                 ? `${item.children.length} sub-workspace${item.children.length > 1 ? 's' : ''}`
                 : 'Click to switch',
             isChild: false,
-            isFolder: false,
-            isGeneral: item.isGeneral,
+            isFolder,
           };
         }
       }
@@ -332,6 +321,9 @@ export default function RadialMenu({
 
     const defaultItem = items[keyboardIndex] || items[0];
     if (defaultItem) {
+      const isFolder = defaultItem.preset?.actions.some((a) =>
+        a.executable.toLowerCase().includes('explorer')
+      ) || false;
       return {
         title: defaultItem.name,
         subtitle:
@@ -339,8 +331,7 @@ export default function RadialMenu({
             ? `${defaultItem.children.length} sub-workspace${defaultItem.children.length > 1 ? 's' : ''}`
             : 'Click to switch',
         isChild: false,
-        isFolder: false,
-        isGeneral: defaultItem.isGeneral,
+        isFolder,
       };
     }
 
@@ -580,15 +571,11 @@ export default function RadialMenu({
                 className={`w-8 h-8 rounded-full flex items-center justify-center mb-1.5 border ${
                   activeDisplay.isFolder
                     ? 'bg-amber-500/20 border-amber-400/40 text-amber-300'
-                    : activeDisplay.isGeneral
-                    ? 'bg-indigo-500/20 border-indigo-400/40 text-indigo-300'
                     : 'bg-indigo-500/20 border-indigo-400/40 text-indigo-300'
                 }`}
               >
                 {activeDisplay.isFolder ? (
                   <Folder size={16} />
-                ) : activeDisplay.isGeneral ? (
-                  <Monitor size={16} />
                 ) : (
                   <Layers size={16} />
                 )}
@@ -606,7 +593,9 @@ export default function RadialMenu({
           ) : (
             <div className="flex flex-col items-center">
               <Sparkles size={20} className="text-indigo-400 mb-1" />
-              <span className="text-xs text-slate-400 font-medium">Select Workspace</span>
+              <span className="text-xs text-slate-400 font-medium">
+                {items.length === 0 ? 'No Workspaces Found' : 'Select Workspace'}
+              </span>
             </div>
           )}
         </div>
@@ -614,8 +603,7 @@ export default function RadialMenu({
 
       {/* Bottom Hint */}
       <div className="absolute bottom-6 flex items-center gap-6 text-xs text-slate-500 font-mono">
-        <span><strong className="text-slate-400">0</strong> General</span>
-        <span><strong className="text-slate-400">1-{Math.max(1, items.length - 1)}</strong> Workspaces</span>
+        <span><strong className="text-slate-400">{items.length > 0 ? `1-${items.length}` : '0'}</strong> Workspaces</span>
         <span><strong className="text-slate-400">Outer Ring</strong> Sub-workspaces</span>
         <span><strong className="text-slate-400">Hover / Click</strong> Select</span>
         <span><strong className="text-slate-400">Esc</strong> Close</span>
