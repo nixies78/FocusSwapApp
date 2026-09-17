@@ -4,24 +4,30 @@ This project has been initialized with Git. Follow these instructions to link th
 
 ---
 
-## Step 1: Create a GitHub Repository
-1. Open [GitHub: Create a New Repository](https://github.com/new?name=FocusSwapApp).
-2. Set repository name to: `FocusSwapApp`
-3. Choose **Private** or **Public**.
-4. **Important**: Leave "Initialize this repository with a README" **UNCHECKED** (initial files are already generated).
-5. Click **Create repository**.
+## Linked Repository
+This project is connected to:
+**`https://github.com/nixies78/FocusSwapApp.git`**
 
 ---
 
-## Step 2: Link This Folder to GitHub
-Run the following commands in this directory (`C:\VibeCoding\FocusSwapApp`):
+## Installing on Computer 2 (at `C:\VibeCoding\FocusSwapApp`)
 
-```bash
-git remote add origin https://github.com/<YOUR-GITHUB-USERNAME>/FocusSwapApp.git
-git branch -M main
-git push -u origin main
-```
-*(Replace `<YOUR-GITHUB-USERNAME>` with your GitHub username)*
+1. Open a Command Prompt or PowerShell terminal.
+2. Create and enter `C:\VibeCoding`:
+   ```cmd
+   mkdir C:\VibeCoding
+   cd C:\VibeCoding
+   ```
+3. Clone the repository into `FocusSwapApp`:
+   ```cmd
+   git clone https://github.com/nixies78/FocusSwapApp.git
+   ```
+4. Enter the folder:
+   ```cmd
+   cd C:\VibeCoding\FocusSwapApp
+   ```
+5. Double-click **`enable_autostart.bat`** to enable startup on Windows boot.
+6. Double-click **`start.bat`** to run FocusDeck immediately. No build tools needed!
 
 ---
 
