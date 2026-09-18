@@ -360,6 +360,7 @@ pub fn get_all_visible_hwnds() -> std::collections::HashSet<isize> {
     set
 }
 
+#[allow(dead_code)]
 struct FindContext<'a> {
     target_pid: Option<u32>,
     title_pattern: Option<String>,

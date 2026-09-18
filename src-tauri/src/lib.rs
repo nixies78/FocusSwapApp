@@ -29,6 +29,24 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 static GLOBAL_APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 
+fn trigger_toggle_overlay(source: &'static str) {
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("focusdeck_status.log")
+        .and_then(|mut f| {
+            use std::io::Write;
+            writeln!(f, "[{}] Triggered toggle_overlay", source)
+        });
+
+    if let Some(app) = GLOBAL_APP_HANDLE.get() {
+        let app_c = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            toggle_overlay(&app_c);
+        });
+    }
+}
+
 unsafe extern "system" fn low_level_keyboard_proc(
     n_code: i32,
     w_param: WPARAM,
@@ -40,40 +58,34 @@ unsafe extern "system" fn low_level_keyboard_proc(
             let kbd = &*(l_param.0 as *const KBDLLHOOKSTRUCT);
             let vk = kbd.vkCode;
 
-            let is_ctrl = GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0;
-            let is_shift = GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0;
+            let is_ctrl = (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0)
+                || (GetAsyncKeyState(0x11) as u16 & 0x8000 != 0);
+            let is_shift = (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0)
+                || (GetAsyncKeyState(0x10) as u16 & 0x8000 != 0);
             let is_alt = (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000 != 0)
                 || (kbd.flags.0 & 0x20 != 0);
 
-            // 1. Shift + Ctrl + C (0x43) -> Mouse Button 3 in Razer Synapse
+            // 1. Shift + Ctrl + C (0x43) -> Razer Synapse mouse button mapping
             if (vk == 0x43 || vk == 0x63) && is_ctrl && is_shift {
-                if let Some(app) = GLOBAL_APP_HANDLE.get() {
-                    toggle_overlay(app);
-                }
+                trigger_toggle_overlay("Native Hook: Shift+Ctrl+C");
                 return LRESULT(1);
             }
 
             // 2. F14 (0x7D)
             if vk == 0x7D {
-                if let Some(app) = GLOBAL_APP_HANDLE.get() {
-                    toggle_overlay(app);
-                }
+                trigger_toggle_overlay("Native Hook: F14");
                 return LRESULT(1);
             }
 
             // 3. Ctrl + Shift + Space
             if vk == VK_SPACE.0 as u32 && is_ctrl && is_shift && !is_alt {
-                if let Some(app) = GLOBAL_APP_HANDLE.get() {
-                    toggle_overlay(app);
-                }
+                trigger_toggle_overlay("Native Hook: Ctrl+Shift+Space");
                 return LRESULT(1);
             }
 
-            // 5. Alt + Q (fallback)
+            // 4. Alt + Q (fallback)
             if vk == 0x51 && is_alt && !is_ctrl {
-                if let Some(app) = GLOBAL_APP_HANDLE.get() {
-                    toggle_overlay(app);
-                }
+                trigger_toggle_overlay("Native Hook: Alt+Q");
                 return LRESULT(1);
             }
         }
@@ -86,20 +98,42 @@ fn start_native_hotkey_hook(app: AppHandle) {
 
     std::thread::spawn(|| {
         unsafe {
+            let hmod = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
             let hook = SetWindowsHookExW(
                 WH_KEYBOARD_LL,
                 Some(low_level_keyboard_proc),
-                None,
+                hmod,
                 0,
             );
 
-            if let Ok(h) = hook {
-                let mut msg = MSG::default();
-                while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-                    let _ = TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
+            match hook {
+                Ok(h) => {
+                    let _ = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("focusdeck_status.log")
+                        .and_then(|mut f| {
+                            use std::io::Write;
+                            writeln!(f, "Native WH_KEYBOARD_LL hook active with hmod: {:?}", hmod)
+                        });
+
+                    let mut msg = MSG::default();
+                    while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                    let _ = UnhookWindowsHookEx(h);
                 }
-                let _ = UnhookWindowsHookEx(h);
+                Err(e) => {
+                    let _ = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("focusdeck_status.log")
+                        .and_then(|mut f| {
+                            use std::io::Write;
+                            writeln!(f, "ERROR: SetWindowsHookExW failed: {:?}", e)
+                        });
+                }
             }
         }
     });
@@ -107,10 +141,10 @@ fn start_native_hotkey_hook(app: AppHandle) {
 
 fn toggle_overlay(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        if let Ok(is_visible) = window.is_visible() {
-            if is_visible {
-                let _ = window.hide();
-            } else {
+        let is_visible = window.is_visible().unwrap_or(false);
+        if is_visible {
+            let _ = window.hide();
+        } else {
                 // Position and size to cover target monitor
                 let mon = window.current_monitor().ok().flatten()
                     .or_else(|| window.primary_monitor().ok().flatten());
@@ -138,7 +172,6 @@ fn toggle_overlay(app: &AppHandle) {
                 }
             }
         }
-    }
 }
 
 #[tauri::command]
@@ -333,20 +366,21 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // Start low-level native keyboard hook (supports Shift+Ctrl+C, F14, F13, Ctrl+Shift+Space, Alt+Q)
-            start_native_hotkey_hook(app.handle().clone());
-
             // Also register via Tauri global shortcut plugin as secondary fallback
-            let mut registered: Vec<&'static str> = Vec::new();
-            registered.push("Shift+Ctrl+C");
-            registered.push("F14");
-            registered.push("Ctrl+Shift+Space");
-            registered.push("Alt+Q");
-
-            let shortcuts_to_try = ["Ctrl+Shift+C", "F14", "Ctrl+Shift+Space", "Alt+Q"];
+            let shortcuts_to_try = [
+                "Ctrl+Shift+C",
+                "Shift+Ctrl+C",
+                "F14",
+                "Ctrl+Shift+Space",
+                "Alt+Q",
+            ];
+            let mut plugin_results = Vec::new();
             for sc in &shortcuts_to_try {
                 if let Ok(shortcut) = sc.parse::<Shortcut>() {
-                    let _ = app.global_shortcut().register(shortcut);
+                    match app.global_shortcut().register(shortcut) {
+                        Ok(_) => plugin_results.push(format!("{}: REGISTERED", sc)),
+                        Err(e) => plugin_results.push(format!("{}: FAILED({:?})", sc, e)),
+                    }
                 }
             }
 
@@ -355,12 +389,14 @@ pub fn run() {
             let _ = std::fs::write(
                 "focusdeck_status.log",
                 format!(
-                    "FocusDeck Active.\nActive Shortcuts: {:?}\nPrimary: {}\nAutostart: {}\n",
-                    registered,
-                    primary_shortcut,
+                    "FocusDeck Active.\nPrimary Shortcuts: Shift+Ctrl+C / F14 (fallback Alt+Q)\nGlobal Plugin Shortcuts: {:?}\nAutostart: {}\n",
+                    plugin_results,
                     autostart::is_autostart_enabled()
                 ),
             );
+
+            // Start low-level native keyboard hook (supports Shift+Ctrl+C, F14, Ctrl+Shift+Space, Alt+Q)
+            start_native_hotkey_hook(app.handle().clone());
 
             // Register Tray Icon & Menu
             let toggle_label = format!("Toggle FocusDeck ({})", primary_shortcut);
