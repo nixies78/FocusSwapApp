@@ -16,6 +16,95 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
+use std::sync::OnceLock;
+use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT, VK_SPACE,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW,
+    TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
+    WM_KEYDOWN, WM_SYSKEYDOWN,
+};
+
+static GLOBAL_APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+
+unsafe extern "system" fn low_level_keyboard_proc(
+    n_code: i32,
+    w_param: WPARAM,
+    l_param: LPARAM,
+) -> LRESULT {
+    if n_code >= 0 {
+        let msg = w_param.0 as u32;
+        if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
+            let kbd = &*(l_param.0 as *const KBDLLHOOKSTRUCT);
+            let vk = kbd.vkCode;
+
+            let is_alt = (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000 != 0)
+                || (kbd.flags.0 & 0x20 != 0);
+            let is_ctrl = GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0;
+            let is_shift = GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0;
+
+            // 1. Alt + Space
+            if vk == VK_SPACE.0 as u32 && is_alt && !is_ctrl {
+                if let Some(app) = GLOBAL_APP_HANDLE.get() {
+                    toggle_overlay(app);
+                }
+                return LRESULT(1); // Consume so Windows system menu does not open!
+            }
+
+            // 2. Alt + Q
+            if vk == 0x51 && is_alt && !is_ctrl {
+                if let Some(app) = GLOBAL_APP_HANDLE.get() {
+                    toggle_overlay(app);
+                }
+                return LRESULT(1);
+            }
+
+            // 3. Ctrl + Space
+            if vk == VK_SPACE.0 as u32 && is_ctrl && !is_alt && !is_shift {
+                if let Some(app) = GLOBAL_APP_HANDLE.get() {
+                    toggle_overlay(app);
+                }
+                return LRESULT(1);
+            }
+
+            // 4. Ctrl + Shift + Space
+            if vk == VK_SPACE.0 as u32 && is_ctrl && is_shift && !is_alt {
+                if let Some(app) = GLOBAL_APP_HANDLE.get() {
+                    toggle_overlay(app);
+                }
+                return LRESULT(1);
+            }
+        }
+    }
+    CallNextHookEx(None, n_code, w_param, l_param)
+}
+
+fn start_native_hotkey_hook(app: AppHandle) {
+    let _ = GLOBAL_APP_HANDLE.set(app);
+
+    std::thread::spawn(|| {
+        unsafe {
+            let hook = SetWindowsHookExW(
+                WH_KEYBOARD_LL,
+                Some(low_level_keyboard_proc),
+                None,
+                0,
+            );
+
+            if let Ok(h) = hook {
+                let mut msg = MSG::default();
+                while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+                let _ = UnhookWindowsHookEx(h);
+            }
+        }
+    });
+}
+
 fn toggle_overlay(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if let Ok(is_visible) = window.is_visible() {
@@ -244,9 +333,15 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // Register default shortcuts (supports Alt+Space, Ctrl+Shift+Space, Alt+Q, Ctrl+Space)
+            // Start low-level native keyboard hook (guarantees Alt+Space, Alt+Q, Ctrl+Space work system-wide)
+            start_native_hotkey_hook(app.handle().clone());
+
+            // Also register via Tauri global shortcut plugin as secondary fallback
             let mut registered: Vec<&'static str> = Vec::new();
-            let shortcuts_to_try = ["Alt+Space", "Ctrl+Shift+Space", "Alt+Q", "Ctrl+Space"];
+            registered.push("Alt+Space");
+            registered.push("Alt+Q");
+
+            let shortcuts_to_try = ["Ctrl+Shift+Space", "Ctrl+Space"];
             for sc in &shortcuts_to_try {
                 if let Ok(shortcut) = sc.parse::<Shortcut>() {
                     if app.global_shortcut().register(shortcut).is_ok() {
@@ -255,15 +350,7 @@ pub fn run() {
                 }
             }
 
-            let primary_shortcut = if registered.contains(&"Alt+Space") {
-                "Alt+Space"
-            } else if registered.contains(&"Ctrl+Shift+Space") {
-                "Ctrl+Shift+Space"
-            } else if registered.contains(&"Alt+Q") {
-                "Alt+Q"
-            } else {
-                "Click Tray"
-            };
+            let primary_shortcut = "Alt+Space";
 
             let _ = std::fs::write(
                 "focusdeck_status.log",
