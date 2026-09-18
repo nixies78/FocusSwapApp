@@ -3,7 +3,7 @@ use std::path::Path;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use windows::core::PWSTR;
-use windows::Win32::Foundation::{BOOL, CloseHandle, HWND, LPARAM, RECT};
+use windows::Win32::Foundation::{BOOL, CloseHandle, HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
@@ -11,13 +11,13 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
-    PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, TerminateProcess,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, EnumWindows, GetClassNameW, GetWindowRect, GetWindowTextLengthW,
     GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-    IsZoomed, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP,
-    SWP_SHOWWINDOW, SW_MAXIMIZE, SW_RESTORE, SW_SHOW,
+    IsZoomed, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP,
+    SWP_SHOWWINDOW, SW_MAXIMIZE, SW_MINIMIZE, SW_HIDE, SW_RESTORE, SW_SHOW, WM_CLOSE,
 };
 
 use crate::config::Placement;
@@ -629,3 +629,239 @@ pub fn resolve_folder_path(raw: &str) -> String {
     clean.to_string()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CleanupSummary {
+    pub minimized: usize,
+    pub killed: usize,
+    pub closed: usize,
+    pub kept: usize,
+}
+
+struct CleanupTarget {
+    hwnd: HWND,
+    title: String,
+    executable: String,
+    process_id: u32,
+    is_file_explorer: bool,
+}
+
+unsafe extern "system" fn collect_cleanup_targets_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let targets = &mut *(lparam.0 as *mut Vec<CleanupTarget>);
+
+    if !IsWindowVisible(hwnd).as_bool() {
+        return BOOL(1);
+    }
+
+    let mut cloaked: u32 = 0;
+    let _ = DwmGetWindowAttribute(
+        hwnd,
+        DWMWA_CLOAKED,
+        &mut cloaked as *mut u32 as *mut _,
+        std::mem::size_of::<u32>() as u32,
+    );
+    if cloaked != 0 {
+        return BOOL(1);
+    }
+
+    let mut rect = RECT::default();
+    if GetWindowRect(hwnd, &mut rect).is_ok() {
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        if width <= 10 || height <= 10 {
+            return BOOL(1);
+        }
+    }
+
+    let length = GetWindowTextLengthW(hwnd);
+    if length <= 0 {
+        return BOOL(1);
+    }
+
+    let mut buf = vec![0u16; (length + 1) as usize];
+    let copied = GetWindowTextW(hwnd, &mut buf);
+    if copied <= 0 {
+        return BOOL(1);
+    }
+    let title = String::from_utf16_lossy(&buf[..copied as usize]).trim().to_string();
+
+    let title_lower = title.to_lowercase();
+    if title_lower == "program manager"
+        || title_lower == "windows input experience"
+        || title_lower == "focusdeck overlay"
+        || title_lower == "focusdeck"
+    {
+        return BOOL(1);
+    }
+
+    let mut process_id: u32 = 0;
+    GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+    if process_id == 0 || process_id == std::process::id() {
+        return BOOL(1);
+    }
+
+    let mut exe_name = String::new();
+    if let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) {
+        let mut path_buf = vec![0u16; 1024];
+        let mut size = path_buf.len() as u32;
+        if QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_FORMAT(0),
+            PWSTR(path_buf.as_mut_ptr()),
+            &mut size,
+        )
+        .is_ok()
+        {
+            let exe_path = String::from_utf16_lossy(&path_buf[..size as usize]);
+            if let Some(name) = Path::new(&exe_path).file_name() {
+                exe_name = name.to_string_lossy().to_string();
+            }
+        }
+        let _ = CloseHandle(handle);
+    }
+
+    if exe_name.is_empty() {
+        return BOOL(1);
+    }
+
+    let exe_lower = exe_name.to_lowercase();
+
+    let mut class_buf = vec![0u16; 256];
+    let class_len = GetClassNameW(hwnd, &mut class_buf);
+    let class_name = String::from_utf16_lossy(&class_buf[..class_len as usize]);
+
+    let is_file_explorer = (exe_lower == "explorer.exe" || exe_lower == "explorer")
+        && (class_name == "CabinetWClass" || class_name == "ExploreWClass");
+
+    if (exe_lower == "explorer.exe" || exe_lower == "explorer") && !is_file_explorer {
+        return BOOL(1);
+    }
+
+    if exe_lower == "shellexperiencehost.exe"
+        || exe_lower == "searchhost.exe"
+        || exe_lower == "lockapp.exe"
+        || exe_lower == "taskmgr.exe"
+        || exe_lower == "systemsettings.exe"
+        || exe_lower == "startmenuexperiencehost.exe"
+        || exe_lower == "textinputhost.exe"
+    {
+        return BOOL(1);
+    }
+
+    targets.push(CleanupTarget {
+        hwnd,
+        title,
+        executable: exe_name,
+        process_id,
+        is_file_explorer,
+    });
+
+    BOOL(1)
+}
+
+pub fn execute_smart_cleanup() -> Result<CleanupSummary, String> {
+    let cleanup_cfg = crate::config::get_cleanup_config().unwrap_or_default();
+    let mut targets: Vec<CleanupTarget> = Vec::new();
+
+    unsafe {
+        let _ = EnumWindows(
+            Some(collect_cleanup_targets_callback),
+            LPARAM(&mut targets as *mut Vec<CleanupTarget> as isize),
+        );
+    }
+
+    let mut summary = CleanupSummary::default();
+
+    for target in targets {
+        // Find if any custom rule matches
+        let matched_rule = cleanup_cfg.rules.iter().find(|rule| {
+            let mut match_exe = false;
+            let mut match_title = false;
+            let has_exe_filter = rule.executable.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+            let has_title_filter = rule.title_contains.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+
+            if !has_exe_filter && !has_title_filter {
+                return false;
+            }
+
+            if let Some(ref rule_exe) = rule.executable {
+                let r_exe = rule_exe.trim().to_lowercase();
+                if !r_exe.is_empty() {
+                    match_exe = target.executable.to_lowercase().contains(&r_exe);
+                }
+            } else {
+                match_exe = true;
+            }
+
+            if let Some(ref rule_title) = rule.title_contains {
+                let r_title = rule_title.trim().to_lowercase();
+                if !r_title.is_empty() {
+                    match_title = target.title.to_lowercase().contains(&r_title);
+                }
+            } else {
+                match_title = true;
+            }
+
+            // Both active filters must match
+            if has_exe_filter && has_title_filter {
+                match_exe && match_title
+            } else if has_exe_filter {
+                match_exe
+            } else {
+                match_title
+            }
+        });
+
+        let action = matched_rule
+            .map(|r| r.action.to_lowercase())
+            .unwrap_or_else(|| cleanup_cfg.default_action.to_lowercase());
+
+        match action.as_str() {
+            "keep" | "nothing" => {
+                summary.kept += 1;
+            }
+            "minimize" => {
+                unsafe {
+                    let _ = ShowWindow(target.hwnd, SW_MINIMIZE);
+                }
+                summary.minimized += 1;
+            }
+            "close" => {
+                unsafe {
+                    let _ = PostMessageW(target.hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
+                }
+                summary.closed += 1;
+            }
+            "kill" => {
+                unsafe {
+                    let _ = ShowWindow(target.hwnd, SW_HIDE);
+                    let _ = PostMessageW(target.hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
+                }
+
+                let exe_lower = target.executable.to_lowercase();
+                let is_browser = exe_lower.contains("chrome")
+                    || exe_lower.contains("msedge")
+                    || exe_lower.contains("firefox")
+                    || exe_lower.contains("brave");
+
+                // Never terminate explorer or shared browsers forcibly to protect user sessions
+                if !target.is_file_explorer && !is_browser {
+                    unsafe {
+                        if let Ok(h) = OpenProcess(PROCESS_TERMINATE, false, target.process_id) {
+                            let _ = TerminateProcess(h, 1);
+                            let _ = CloseHandle(h);
+                        }
+                    }
+                }
+                summary.killed += 1;
+            }
+            _ => {
+                unsafe {
+                    let _ = ShowWindow(target.hwnd, SW_MINIMIZE);
+                }
+                summary.minimized += 1;
+            }
+        }
+    }
+
+    Ok(summary)
+}

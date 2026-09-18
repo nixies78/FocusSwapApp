@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { SlidersHorizontal, X, Sparkles, Layers, RefreshCw, Folder } from 'lucide-react';
-import { Preset } from '../types';
+import { SlidersHorizontal, X, Sparkles, Layers, RefreshCw, Folder, Settings } from 'lucide-react';
+import { Preset, CleanupSummary } from '../types';
 
 interface RadialMenuProps {
   presets: Preset[];
@@ -9,6 +9,7 @@ interface RadialMenuProps {
   onSelectPreset: (preset: Preset) => void;
   onSelectGeneral?: () => void;
   onOpenManager: () => void;
+  onOpenSmartCleanupManager?: () => void;
   onClose: () => void;
 }
 
@@ -31,11 +32,38 @@ export default function RadialMenu({
   activeSessionId,
   onSelectPreset,
   onOpenManager,
+  onOpenSmartCleanupManager,
   onClose,
 }: RadialMenuProps) {
   const [hoverTarget, setHoverTarget] = useState<HoverTarget>(null);
   const [keyboardIndex, setKeyboardIndex] = useState<number>(0);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [cleanupToast, setCleanupToast] = useState<string | null>(null);
+
+  const handleExecuteSmartCleanup = async () => {
+    if (isCleaning) return;
+    setIsCleaning(true);
+    try {
+      const summary = await invoke<CleanupSummary>('execute_smart_cleanup');
+      const parts: string[] = [];
+      if (summary.minimized > 0) parts.push(`${summary.minimized} minimised`);
+      if (summary.killed > 0) parts.push(`${summary.killed} killed`);
+      if (summary.closed > 0) parts.push(`${summary.closed} closed`);
+      if (summary.kept > 0) parts.push(`${summary.kept} kept`);
+
+      const text = parts.length > 0 ? parts.join(', ') : 'All clear';
+      setCleanupToast(`Smart Cleanup: ${text}`);
+      setTimeout(() => setCleanupToast(null), 3500);
+      await invoke('hide_overlay');
+    } catch (err) {
+      console.error('Failed to execute smart cleanup:', err);
+      setCleanupToast('Cleanup failed');
+      setTimeout(() => setCleanupToast(null), 3000);
+    } finally {
+      setIsCleaning(false);
+    }
+  };
 
   const handleUpdateAndRestart = async () => {
     if (isUpdating) return;
@@ -607,6 +635,40 @@ export default function RadialMenu({
         <span><strong className="text-slate-400">Outer Ring</strong> Sub-workspaces</span>
         <span><strong className="text-slate-400">Hover / Click</strong> Select</span>
         <span><strong className="text-slate-400">Esc</strong> Close</span>
+      </div>
+
+      {/* Bottom Right Smart Cleanup Button Group */}
+      <div className="fixed bottom-6 right-6 z-40 flex items-center space-x-2">
+        {cleanupToast && (
+          <div className="mr-1 px-3 py-2 rounded-xl bg-indigo-950/90 border border-indigo-500/40 text-indigo-200 text-xs font-medium shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150">
+            {cleanupToast}
+          </div>
+        )}
+
+        <button
+          onClick={handleExecuteSmartCleanup}
+          disabled={isCleaning}
+          className="flex items-center space-x-2 px-4 py-2.5 bg-slate-900/90 hover:bg-indigo-600 text-slate-200 hover:text-white rounded-xl border border-slate-700/70 hover:border-indigo-500 shadow-2xl backdrop-blur-xl transition-all duration-150 active:scale-95 text-xs font-semibold cursor-pointer group disabled:opacity-50"
+          title="Smart Cleanup: Minimize all windows or execute custom rules"
+        >
+          <Sparkles
+            size={15}
+            className={`text-indigo-400 group-hover:text-white transition-transform duration-200 ${
+              isCleaning ? 'animate-spin' : 'group-hover:scale-110'
+            }`}
+          />
+          <span>{isCleaning ? 'Cleaning...' : 'Smart Cleanup'}</span>
+        </button>
+
+        {onOpenSmartCleanupManager && (
+          <button
+            onClick={onOpenSmartCleanupManager}
+            className="p-2.5 bg-slate-900/90 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-700/70 hover:border-slate-500 shadow-2xl backdrop-blur-xl transition-all duration-150 active:scale-95 cursor-pointer"
+            title="Configure Smart Cleanup Rules & Capture Screen"
+          >
+            <Settings size={15} className="hover:rotate-45 transition-transform duration-200" />
+          </button>
+        )}
       </div>
     </div>
   );

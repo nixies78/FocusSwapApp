@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { CapturedLayout, Preset } from './types';
+import { CapturedLayout, Preset, CleanupSummary } from './types';
 import WorkspacesManager from './components/WorkspacesManager';
 import WorkspaceEditor from './components/WorkspaceEditor';
 import RadialMenu from './components/RadialMenu';
+import SmartCleanupModal from './components/SmartCleanupModal';
 
 export default function App() {
   const [view, setView] = useState<'launcher' | 'manager' | 'editor'>('launcher');
@@ -12,6 +13,7 @@ export default function App() {
   const [capturedLayout, setCapturedLayout] = useState<CapturedLayout | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [isCleanupModalOpen, setIsCleanupModalOpen] = useState(false);
 
   const fetchActiveSession = async () => {
     try {
@@ -129,16 +131,35 @@ export default function App() {
     setView('editor');
   };
 
+  const handleRunCleanup = async () => {
+    try {
+      const summary = await invoke<CleanupSummary>('execute_smart_cleanup');
+      await invoke('hide_overlay');
+      return summary;
+    } catch (err) {
+      console.error('Failed to run cleanup:', err);
+      return undefined;
+    }
+  };
+
   if (view === 'launcher') {
     return (
-      <RadialMenu
-        presets={presets}
-        activeSessionId={activeSessionId}
-        onSelectPreset={handleExecute}
-        onSelectGeneral={handleSwitchToGeneral}
-        onOpenManager={() => setView('manager')}
-        onClose={handleHide}
-      />
+      <>
+        <RadialMenu
+          presets={presets}
+          activeSessionId={activeSessionId}
+          onSelectPreset={handleExecute}
+          onSelectGeneral={handleSwitchToGeneral}
+          onOpenManager={() => setView('manager')}
+          onOpenSmartCleanupManager={() => setIsCleanupModalOpen(true)}
+          onClose={handleHide}
+        />
+        <SmartCleanupModal
+          isOpen={isCleanupModalOpen}
+          onClose={() => setIsCleanupModalOpen(false)}
+          onRunCleanup={handleRunCleanup}
+        />
+      </>
     );
   }
 
@@ -171,6 +192,12 @@ export default function App() {
           onCancel={() => setView('manager')}
         />
       )}
+
+      <SmartCleanupModal
+        isOpen={isCleanupModalOpen}
+        onClose={() => setIsCleanupModalOpen(false)}
+        onRunCleanup={handleRunCleanup}
+      />
     </div>
   );
 }

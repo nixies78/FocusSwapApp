@@ -173,6 +173,21 @@ fn get_chrome_profiles() -> Result<Vec<launcher::ChromeProfile>, String> {
 }
 
 #[tauri::command]
+fn get_cleanup_config() -> Result<config::CleanupConfig, String> {
+    config::get_cleanup_config()
+}
+
+#[tauri::command]
+fn save_cleanup_config(cleanup: config::CleanupConfig) -> Result<(), String> {
+    config::save_cleanup_config(cleanup)
+}
+
+#[tauri::command]
+fn execute_smart_cleanup() -> Result<win32_layout::CleanupSummary, String> {
+    win32_layout::execute_smart_cleanup()
+}
+
+#[tauri::command]
 fn update_and_restart(_app: AppHandle) -> Result<(), String> {
     let exe_dir = if let Ok(exe_path) = std::env::current_exe() {
         exe_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf()
@@ -364,6 +379,9 @@ pub fn run() {
             is_autostart_enabled,
             set_autostart_enabled,
             get_chrome_profiles,
+            get_cleanup_config,
+            save_cleanup_config,
+            execute_smart_cleanup,
             update_and_restart,
         ])
         .build(tauri::generate_context!())

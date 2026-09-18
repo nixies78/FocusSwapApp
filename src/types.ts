@@ -65,3 +65,25 @@ export interface ChromeProfile {
   user_name: string;
 }
 
+export type CleanupRuleAction = 'minimize' | 'keep' | 'kill' | 'close';
+
+export interface CleanupRule {
+  id: string;
+  name: string;
+  executable?: string;
+  title_contains?: string;
+  action: CleanupRuleAction;
+}
+
+export interface CleanupConfig {
+  default_action: CleanupRuleAction;
+  rules: CleanupRule[];
+}
+
+export interface CleanupSummary {
+  minimized: number;
+  killed: number;
+  closed: number;
+  kept: number;
+}
+

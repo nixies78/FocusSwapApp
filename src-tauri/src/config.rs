@@ -49,13 +49,48 @@ pub struct Preset {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CleanupRule {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub executable: Option<String>,
+    #[serde(default)]
+    pub title_contains: Option<String>,
+    pub action: String, // "minimize", "keep", "kill", "close"
+}
+
+fn default_cleanup_action() -> String {
+    "minimize".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CleanupConfig {
+    #[serde(default = "default_cleanup_action")]
+    pub default_action: String,
+    #[serde(default)]
+    pub rules: Vec<CleanupRule>,
+}
+
+impl Default for CleanupConfig {
+    fn default() -> Self {
+        Self {
+            default_action: "minimize".to_string(),
+            rules: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceConfig {
     pub presets: Vec<Preset>,
+    #[serde(default)]
+    pub cleanup: Option<CleanupConfig>,
 }
 
 impl Default for WorkspaceConfig {
     fn default() -> Self {
         Self {
+            cleanup: Some(CleanupConfig::default()),
             presets: vec![
                 Preset {
                     id: "calendar".to_string(),
@@ -230,8 +265,26 @@ pub fn save_config(config: &WorkspaceConfig) -> Result<(), String> {
 }
 
 pub fn save_presets(presets: Vec<Preset>) -> Result<(), String> {
-    let config = WorkspaceConfig { presets };
+    let mut config = load_config().unwrap_or_else(|_| WorkspaceConfig {
+        presets: Vec::new(),
+        cleanup: None,
+    });
+    config.presets = presets;
     save_config(&config)
+}
+
+pub fn get_cleanup_config() -> Result<CleanupConfig, String> {
+    let cfg = load_config()?;
+    Ok(cfg.cleanup.unwrap_or_default())
+}
+
+pub fn save_cleanup_config(cleanup: CleanupConfig) -> Result<(), String> {
+    let mut cfg = load_config().unwrap_or_else(|_| WorkspaceConfig {
+        presets: Vec::new(),
+        cleanup: None,
+    });
+    cfg.cleanup = Some(cleanup);
+    save_config(&cfg)
 }
 
 pub fn delete_preset(preset_id: &str) -> Result<Vec<Preset>, String> {
