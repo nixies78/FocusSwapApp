@@ -40,29 +40,29 @@ unsafe extern "system" fn low_level_keyboard_proc(
             let kbd = &*(l_param.0 as *const KBDLLHOOKSTRUCT);
             let vk = kbd.vkCode;
 
+            let is_ctrl = (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0);
+            let is_shift = (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0);
             let is_alt = (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000 != 0)
                 || (kbd.flags.0 & 0x20 != 0);
-            let is_ctrl = GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0;
-            let is_shift = GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0;
 
-            // 1. Alt + Space
-            if vk == VK_SPACE.0 as u32 && is_alt && !is_ctrl {
-                if let Some(app) = GLOBAL_APP_HANDLE.get() {
-                    toggle_overlay(app);
-                }
-                return LRESULT(1); // Consume so Windows system menu does not open!
-            }
-
-            // 2. Alt + Q
-            if vk == 0x51 && is_alt && !is_ctrl {
+            // 1. Shift + Ctrl + C (0x43) -> Mouse Button 3 in Razer Synapse
+            if (vk == 0x43 || vk == 0x63) && is_ctrl && is_shift {
                 if let Some(app) = GLOBAL_APP_HANDLE.get() {
                     toggle_overlay(app);
                 }
                 return LRESULT(1);
             }
 
-            // 3. Ctrl + Space
-            if vk == VK_SPACE.0 as u32 && is_ctrl && !is_alt && !is_shift {
+            // 2. F14 (0x7D)
+            if vk == 0x7D {
+                if let Some(app) = GLOBAL_APP_HANDLE.get() {
+                    toggle_overlay(app);
+                }
+                return LRESULT(1);
+            }
+
+            // 3. F13 (0x7C) -> Mouse Button 2 in Razer Synapse
+            if vk == 0x7C {
                 if let Some(app) = GLOBAL_APP_HANDLE.get() {
                     toggle_overlay(app);
                 }
@@ -71,6 +71,14 @@ unsafe extern "system" fn low_level_keyboard_proc(
 
             // 4. Ctrl + Shift + Space
             if vk == VK_SPACE.0 as u32 && is_ctrl && is_shift && !is_alt {
+                if let Some(app) = GLOBAL_APP_HANDLE.get() {
+                    toggle_overlay(app);
+                }
+                return LRESULT(1);
+            }
+
+            // 5. Alt + Q (fallback)
+            if vk == 0x51 && is_alt && !is_ctrl {
                 if let Some(app) = GLOBAL_APP_HANDLE.get() {
                     toggle_overlay(app);
                 }
@@ -333,24 +341,25 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // Start low-level native keyboard hook (guarantees Alt+Space, Alt+Q, Ctrl+Space work system-wide)
+            // Start low-level native keyboard hook (supports Shift+Ctrl+C, F14, F13, Ctrl+Shift+Space, Alt+Q)
             start_native_hotkey_hook(app.handle().clone());
 
             // Also register via Tauri global shortcut plugin as secondary fallback
             let mut registered: Vec<&'static str> = Vec::new();
-            registered.push("Alt+Space");
+            registered.push("Shift+Ctrl+C");
+            registered.push("F14");
+            registered.push("F13");
+            registered.push("Ctrl+Shift+Space");
             registered.push("Alt+Q");
 
-            let shortcuts_to_try = ["Ctrl+Shift+Space", "Ctrl+Space"];
+            let shortcuts_to_try = ["Ctrl+Shift+C", "F14", "F13", "Ctrl+Shift+Space", "Alt+Q"];
             for sc in &shortcuts_to_try {
                 if let Ok(shortcut) = sc.parse::<Shortcut>() {
-                    if app.global_shortcut().register(shortcut).is_ok() {
-                        registered.push(*sc);
-                    }
+                    let _ = app.global_shortcut().register(shortcut);
                 }
             }
 
-            let primary_shortcut = "Alt+Space";
+            let primary_shortcut = "Shift+Ctrl+C / F14";
 
             let _ = std::fs::write(
                 "focusdeck_status.log",
