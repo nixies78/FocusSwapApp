@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { SlidersHorizontal, X, Sparkles, Layers, RefreshCw, Folder, Settings } from 'lucide-react';
 import { Preset, CleanupSummary } from '../types';
+import { APP_VERSION } from '../version';
 
 interface RadialMenuProps {
   presets: Preset[];
@@ -635,6 +636,7 @@ export default function RadialMenu({
         <span><strong className="text-slate-400">Outer Ring</strong> Sub-workspaces</span>
         <span><strong className="text-slate-400">Hover / Click</strong> Select</span>
         <span><strong className="text-slate-400">Esc</strong> Close</span>
+        <span className="ml-4 text-slate-600 font-mono tracking-widest uppercase text-[10px]">{APP_VERSION}</span>
       </div>
 
       {/* Bottom Right Smart Cleanup Button Group */}

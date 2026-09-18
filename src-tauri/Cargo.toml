@@ -1,6 +1,6 @@
 [package]
 name = "focusdeck"
-version = "0.1.0"
+version = "0.2.0"
 description = "FocusDeck - Fast System-wide Task and Workspace Switcher for Windows"
 authors = ["FocusDeck"]
 edition = "2021"
