@@ -14,8 +14,6 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, State,
 };
-use tauri_plugin_global_shortcut::ShortcutState;
-
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, WPARAM};
@@ -33,16 +31,33 @@ static GLOBAL_APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 static CTRL_PRESSED: AtomicBool = AtomicBool::new(false);
 static SHIFT_PRESSED: AtomicBool = AtomicBool::new(false);
 static ALT_PRESSED: AtomicBool = AtomicBool::new(false);
-
-fn trigger_toggle_overlay(source: &'static str) {
+fn log_status(msg: &str) {
+    let now = chrono_or_simple_timestamp();
     let _ = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open("focusdeck_status.log")
         .and_then(|mut f| {
             use std::io::Write;
-            writeln!(f, "[{}] Triggered toggle_overlay", source)
+            writeln!(f, "[{}] {}", now, msg)
         });
+}
+
+fn chrono_or_simple_timestamp() -> String {
+    // Return system timestamp
+    let duration = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = duration.as_secs();
+    let millis = duration.subsec_millis();
+    let hours = (secs / 3600) % 24;
+    let mins = (secs / 60) % 60;
+    let s = secs % 60;
+    format!("{:02}:{:02}:{:02}.{:03}", hours, mins, s, millis)
+}
+
+fn trigger_toggle_overlay(source: &'static str) {
+    log_status(&format!("[{}] Triggered toggle_overlay", source));
 
     if let Some(app) = GLOBAL_APP_HANDLE.get() {
         let app_c = app.clone();
@@ -68,17 +83,23 @@ fn is_cursor_on_local_machine() -> bool {
         let v_right = v_left + v_width;
         let v_bottom = v_top + v_height;
 
-        // 1. Mouse Without Borders hides the cursor on this machine when controlling the remote PC
-        if ci_ok && ci.flags.0 == 0 {
-            return false;
-        }
+        let cursor_hidden = ci_ok && ci.flags.0 == 0;
+        let at_outer_edge = pt_ok && (
+            pt.x <= v_left + 2 ||
+            pt.x >= v_right - 2 ||
+            pt.y <= v_top + 2 ||
+            pt.y >= v_bottom - 2
+        );
+        let parked_at_origin = pt_ok && pt.x == 0 && pt.y == 0;
 
-        // 2. Mouse Without Borders parks the cursor at the outer desktop boundary edge
-        if pt_ok && (pt.x <= v_left || pt.x >= v_right - 1 || pt.y <= v_top || pt.y >= v_bottom - 1) {
-            return false;
-        }
+        let is_remote = cursor_hidden || at_outer_edge || (parked_at_origin && cursor_hidden);
 
-        true
+        log_status(&format!(
+            "[MWB-CHECK] pt=({},{}) hidden={} at_edge={} parked={} → local={}",
+            pt.x, pt.y, cursor_hidden, at_outer_edge, parked_at_origin, !is_remote
+        ));
+
+        !is_remote
     }
 }
 
@@ -142,18 +163,10 @@ unsafe extern "system" fn low_level_keyboard_proc(
             if let Some(source) = matched_source {
                 // Check if mouse cursor is on local machine (Mouse Without Borders multi-machine support)
                 if !is_cursor_on_local_machine() {
-                    let _ = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("focusdeck_status.log")
-                        .and_then(|mut f| {
-                            use std::io::Write;
-                            writeln!(
-                                f,
-                                "[{}] Forwarding: mouse cursor is on remote machine (MWB active)",
-                                source
-                            )
-                        });
+                    log_status(&format!(
+                        "[{}] FORWARDING: mouse cursor is remote. Passing key to MWB!",
+                        source
+                    ));
                     // DO NOT swallow or trigger overlay! Let Mouse Without Borders forward the key across the network!
                     return CallNextHookEx(None, n_code, w_param, l_param);
                 }
@@ -436,24 +449,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, shortcut, event| {
-                    let _ = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("focusdeck_status.log")
-                        .and_then(|mut f| {
-                            use std::io::Write;
-                            writeln!(f, "[Plugin Hotkey Event] {:?} {:?}", shortcut, event.state())
-                        });
-
-                    if event.state() == ShortcutState::Pressed {
-                        toggle_overlay(app);
-                    }
-                })
-                .build(),
-        )
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let _ = window.hide();
@@ -461,21 +456,20 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            let version = env!("CARGO_PKG_VERSION");
             let primary_shortcut = "Shift+Ctrl+C / F14";
 
-            let _ = std::fs::write(
-                "focusdeck_status.log",
-                format!(
-                    "FocusDeck Active.\nPrimary Shortcuts: Shift+Ctrl+C / F14 (fallback Alt+Q)\nMWB Multi-Machine Support: ENABLED\nAutostart: {}\n",
-                    autostart::is_autostart_enabled()
-                ),
-            );
+            log_status(&format!(
+                "FocusDeck v{} Active | Shortcuts: Shift+Ctrl+C / F14 (fallback Alt+Q) | MWB: ENABLED | Autostart: {}",
+                version,
+                autostart::is_autostart_enabled()
+            ));
 
             // Start low-level native keyboard hook (supports Shift+Ctrl+C, F14, Ctrl+Shift+Space, Alt+Q)
             start_native_hotkey_hook(app.handle().clone());
 
             // Register Tray Icon & Menu
-            let toggle_label = format!("Toggle FocusDeck ({})", primary_shortcut);
+            let toggle_label = format!("Toggle FocusDeck v{} ({})", version, primary_shortcut);
             let toggle_item = MenuItem::with_id(app, "toggle", &toggle_label, true, None::<&str>)?;
             let autostart_item = CheckMenuItem::with_id(
                 app,
@@ -517,7 +511,7 @@ pub fn run() {
                 }
             };
 
-            let tooltip = format!("FocusDeck ({})", primary_shortcut);
+            let tooltip = format!("FocusDeck v{} ({})", version, primary_shortcut);
             let tray = TrayIconBuilder::new()
                 .icon(icon)
                 .tooltip(&tooltip)
