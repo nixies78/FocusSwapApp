@@ -16,18 +16,22 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT, VK_SPACE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
-    WM_KEYDOWN, WM_SYSKEYDOWN,
+    CallNextHookEx, DispatchMessageW, GetMessageW, PeekMessageW, SetWindowsHookExW,
+    TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, PM_NOREMOVE, WH_KEYBOARD_LL,
+    WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 static GLOBAL_APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+static CTRL_PRESSED: AtomicBool = AtomicBool::new(false);
+static SHIFT_PRESSED: AtomicBool = AtomicBool::new(false);
+static ALT_PRESSED: AtomicBool = AtomicBool::new(false);
 
 fn trigger_toggle_overlay(source: &'static str) {
     let _ = std::fs::OpenOptions::new()
@@ -54,26 +58,52 @@ unsafe extern "system" fn low_level_keyboard_proc(
 ) -> LRESULT {
     if n_code >= 0 {
         let msg = w_param.0 as u32;
-        if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
-            let kbd = &*(l_param.0 as *const KBDLLHOOKSTRUCT);
-            let vk = kbd.vkCode;
+        let kbd = &*(l_param.0 as *const KBDLLHOOKSTRUCT);
+        let vk = kbd.vkCode;
 
-            let is_ctrl = (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0)
+        // Dynamically track modifier states (crucial for synthetic/injected mouse macro keystrokes)
+        if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
+            if vk == 0x10 || vk == 0xA0 || vk == 0xA1 {
+                SHIFT_PRESSED.store(true, Ordering::SeqCst);
+            }
+            if vk == 0x11 || vk == 0xA2 || vk == 0xA3 {
+                CTRL_PRESSED.store(true, Ordering::SeqCst);
+            }
+            if vk == 0x12 || vk == 0xA4 || vk == 0xA5 {
+                ALT_PRESSED.store(true, Ordering::SeqCst);
+            }
+        } else if msg == WM_KEYUP || msg == WM_SYSKEYUP {
+            if vk == 0x10 || vk == 0xA0 || vk == 0xA1 {
+                SHIFT_PRESSED.store(false, Ordering::SeqCst);
+            }
+            if vk == 0x11 || vk == 0xA2 || vk == 0xA3 {
+                CTRL_PRESSED.store(false, Ordering::SeqCst);
+            }
+            if vk == 0x12 || vk == 0xA4 || vk == 0xA5 {
+                ALT_PRESSED.store(false, Ordering::SeqCst);
+            }
+        }
+
+        if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
+            let is_ctrl = CTRL_PRESSED.load(Ordering::SeqCst)
+                || (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0)
                 || (GetAsyncKeyState(0x11) as u16 & 0x8000 != 0);
-            let is_shift = (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0)
+            let is_shift = SHIFT_PRESSED.load(Ordering::SeqCst)
+                || (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0)
                 || (GetAsyncKeyState(0x10) as u16 & 0x8000 != 0);
-            let is_alt = (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000 != 0)
+            let is_alt = ALT_PRESSED.load(Ordering::SeqCst)
+                || (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000 != 0)
                 || (kbd.flags.0 & 0x20 != 0);
 
-            // 1. Shift + Ctrl + C (0x43) -> Razer Synapse mouse button mapping
+            // 1. Shift + Ctrl + C (0x43) -> Mouse Button 3 in Razer Synapse
             if (vk == 0x43 || vk == 0x63) && is_ctrl && is_shift {
                 trigger_toggle_overlay("Native Hook: Shift+Ctrl+C");
                 return LRESULT(1);
             }
 
-            // 2. F14 (0x7D)
-            if vk == 0x7D {
-                trigger_toggle_overlay("Native Hook: F14");
+            // 2. F13 through F24 (0x7C - 0x87) -> Any extended mouse function key (F13, F14, F15, etc.)
+            if vk >= 0x7C && vk <= 0x87 {
+                trigger_toggle_overlay("Native Hook: Extended Function Key (F13-F24)");
                 return LRESULT(1);
             }
 
@@ -98,6 +128,10 @@ fn start_native_hotkey_hook(app: AppHandle) {
 
     std::thread::spawn(|| {
         unsafe {
+            // Force creation of message queue for this worker thread
+            let mut msg = MSG::default();
+            let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
+
             let hmod = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
             let hook = SetWindowsHookExW(
                 WH_KEYBOARD_LL,
@@ -142,36 +176,45 @@ fn start_native_hotkey_hook(app: AppHandle) {
 fn toggle_overlay(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let is_visible = window.is_visible().unwrap_or(false);
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("focusdeck_status.log")
+            .and_then(|mut f| {
+                use std::io::Write;
+                writeln!(f, "[toggle_overlay] is_visible: {}", is_visible)
+            });
+
         if is_visible {
             let _ = window.hide();
         } else {
-                // Position and size to cover target monitor
-                let mon = window.current_monitor().ok().flatten()
-                    .or_else(|| window.primary_monitor().ok().flatten());
-                if let Some(m) = mon {
-                    let size = m.size();
-                    let pos = m.position();
-                    let _ = window.set_position(tauri::Position::Physical(*pos));
-                    let _ = window.set_size(tauri::Size::Physical(*size));
-
-                    #[cfg(windows)]
-                    {
-                        let center_x = pos.x + (size.width as i32 / 2);
-                        let center_y = pos.y + (size.height as i32 / 2);
-                        unsafe {
-                            let _ = windows::Win32::UI::WindowsAndMessaging::SetCursorPos(center_x, center_y);
-                        }
-                    }
-                }
-                let _ = window.show();
-                let _ = window.set_focus();
+            // Position and size to cover target monitor
+            let mon = window.current_monitor().ok().flatten()
+                .or_else(|| window.primary_monitor().ok().flatten());
+            if let Some(m) = mon {
+                let size = m.size();
+                let pos = m.position();
+                let _ = window.set_position(tauri::Position::Physical(*pos));
+                let _ = window.set_size(tauri::Size::Physical(*size));
 
                 #[cfg(windows)]
-                if let Ok(hwnd) = window.hwnd() {
-                    win32_layout::force_foreground_window(windows::Win32::Foundation::HWND(hwnd.0 as _));
+                {
+                    let center_x = pos.x + (size.width as i32 / 2);
+                    let center_y = pos.y + (size.height as i32 / 2);
+                    unsafe {
+                        let _ = windows::Win32::UI::WindowsAndMessaging::SetCursorPos(center_x, center_y);
+                    }
                 }
             }
+            let _ = window.show();
+            let _ = window.set_focus();
+
+            #[cfg(windows)]
+            if let Ok(hwnd) = window.hwnd() {
+                win32_layout::force_foreground_window(windows::Win32::Foundation::HWND(hwnd.0 as _));
+            }
         }
+    }
 }
 
 #[tauri::command]
@@ -352,7 +395,16 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
+                    let _ = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("focusdeck_status.log")
+                        .and_then(|mut f| {
+                            use std::io::Write;
+                            writeln!(f, "[Plugin Hotkey Event] {:?} {:?}", shortcut, event.state())
+                        });
+
                     if event.state() == ShortcutState::Pressed {
                         toggle_overlay(app);
                     }
@@ -368,9 +420,11 @@ pub fn run() {
         .setup(|app| {
             // Also register via Tauri global shortcut plugin as secondary fallback
             let shortcuts_to_try = [
+                "F13",
+                "F14",
+                "F15",
                 "Ctrl+Shift+C",
                 "Shift+Ctrl+C",
-                "F14",
                 "Ctrl+Shift+Space",
                 "Alt+Q",
             ];
