@@ -40,8 +40,8 @@ unsafe extern "system" fn low_level_keyboard_proc(
             let kbd = &*(l_param.0 as *const KBDLLHOOKSTRUCT);
             let vk = kbd.vkCode;
 
-            let is_ctrl = (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0);
-            let is_shift = (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0);
+            let is_ctrl = GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0;
+            let is_shift = GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0;
             let is_alt = (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000 != 0)
                 || (kbd.flags.0 & 0x20 != 0);
 
@@ -61,15 +61,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
                 return LRESULT(1);
             }
 
-            // 3. F13 (0x7C) -> Mouse Button 2 in Razer Synapse
-            if vk == 0x7C {
-                if let Some(app) = GLOBAL_APP_HANDLE.get() {
-                    toggle_overlay(app);
-                }
-                return LRESULT(1);
-            }
-
-            // 4. Ctrl + Shift + Space
+            // 3. Ctrl + Shift + Space
             if vk == VK_SPACE.0 as u32 && is_ctrl && is_shift && !is_alt {
                 if let Some(app) = GLOBAL_APP_HANDLE.get() {
                     toggle_overlay(app);
@@ -348,11 +340,10 @@ pub fn run() {
             let mut registered: Vec<&'static str> = Vec::new();
             registered.push("Shift+Ctrl+C");
             registered.push("F14");
-            registered.push("F13");
             registered.push("Ctrl+Shift+Space");
             registered.push("Alt+Q");
 
-            let shortcuts_to_try = ["Ctrl+Shift+C", "F14", "F13", "Ctrl+Shift+Space", "Alt+Q"];
+            let shortcuts_to_try = ["Ctrl+Shift+C", "F14", "Ctrl+Shift+Space", "Alt+Q"];
             for sc in &shortcuts_to_try {
                 if let Ok(shortcut) = sc.parse::<Shortcut>() {
                     let _ = app.global_shortcut().register(shortcut);
