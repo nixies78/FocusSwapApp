@@ -14,18 +14,19 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, State,
 };
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::ShortcutState;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
-use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT, VK_SPACE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, PeekMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, PM_NOREMOVE, WH_KEYBOARD_LL,
-    WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, DispatchMessageW, GetCursorInfo, GetCursorPos, GetMessageW, GetSystemMetrics,
+    PeekMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, CURSORINFO,
+    KBDLLHOOKSTRUCT, MSG, PM_NOREMOVE, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+    SM_YVIRTUALSCREEN, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 static GLOBAL_APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
@@ -48,6 +49,36 @@ fn trigger_toggle_overlay(source: &'static str) {
         let _ = app.run_on_main_thread(move || {
             toggle_overlay(&app_c);
         });
+    }
+}
+
+fn is_cursor_on_local_machine() -> bool {
+    unsafe {
+        let mut pt = POINT::default();
+        let pt_ok = GetCursorPos(&mut pt).is_ok();
+
+        let mut ci = CURSORINFO::default();
+        ci.cbSize = std::mem::size_of::<CURSORINFO>() as u32;
+        let ci_ok = GetCursorInfo(&mut ci).is_ok();
+
+        let v_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let v_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        let v_width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        let v_height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        let v_right = v_left + v_width;
+        let v_bottom = v_top + v_height;
+
+        // 1. Mouse Without Borders hides the cursor on this machine when controlling the remote PC
+        if ci_ok && ci.flags.0 == 0 {
+            return false;
+        }
+
+        // 2. Mouse Without Borders parks the cursor at the outer desktop boundary edge
+        if pt_ok && (pt.x <= v_left || pt.x >= v_right - 1 || pt.y <= v_top || pt.y >= v_bottom - 1) {
+            return false;
+        }
+
+        true
     }
 }
 
@@ -95,27 +126,39 @@ unsafe extern "system" fn low_level_keyboard_proc(
                 || (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000 != 0)
                 || (kbd.flags.0 & 0x20 != 0);
 
-            // 1. Shift + Ctrl + C (0x43) -> Mouse Button 3 in Razer Synapse
-            if (vk == 0x43 || vk == 0x63) && is_ctrl && is_shift {
-                trigger_toggle_overlay("Native Hook: Shift+Ctrl+C");
-                return LRESULT(1);
-            }
+            // Determine if the key matches any of our trigger shortcuts
+            let matched_source = if (vk == 0x43 || vk == 0x63) && is_ctrl && is_shift {
+                Some("Native Hook: Shift+Ctrl+C")
+            } else if vk >= 0x7C && vk <= 0x87 {
+                Some("Native Hook: Extended Function Key (F13-F24)")
+            } else if vk == VK_SPACE.0 as u32 && is_ctrl && is_shift && !is_alt {
+                Some("Native Hook: Ctrl+Shift+Space")
+            } else if vk == 0x51 && is_alt && !is_ctrl {
+                Some("Native Hook: Alt+Q")
+            } else {
+                None
+            };
 
-            // 2. F13 through F24 (0x7C - 0x87) -> Any extended mouse function key (F13, F14, F15, etc.)
-            if vk >= 0x7C && vk <= 0x87 {
-                trigger_toggle_overlay("Native Hook: Extended Function Key (F13-F24)");
-                return LRESULT(1);
-            }
+            if let Some(source) = matched_source {
+                // Check if mouse cursor is on local machine (Mouse Without Borders multi-machine support)
+                if !is_cursor_on_local_machine() {
+                    let _ = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("focusdeck_status.log")
+                        .and_then(|mut f| {
+                            use std::io::Write;
+                            writeln!(
+                                f,
+                                "[{}] Forwarding: mouse cursor is on remote machine (MWB active)",
+                                source
+                            )
+                        });
+                    // DO NOT swallow or trigger overlay! Let Mouse Without Borders forward the key across the network!
+                    return CallNextHookEx(None, n_code, w_param, l_param);
+                }
 
-            // 3. Ctrl + Shift + Space
-            if vk == VK_SPACE.0 as u32 && is_ctrl && is_shift && !is_alt {
-                trigger_toggle_overlay("Native Hook: Ctrl+Shift+Space");
-                return LRESULT(1);
-            }
-
-            // 4. Alt + Q (fallback)
-            if vk == 0x51 && is_alt && !is_ctrl {
-                trigger_toggle_overlay("Native Hook: Alt+Q");
+                trigger_toggle_overlay(source);
                 return LRESULT(1);
             }
         }
@@ -418,33 +461,12 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // Also register via Tauri global shortcut plugin as secondary fallback
-            let shortcuts_to_try = [
-                "F13",
-                "F14",
-                "F15",
-                "Ctrl+Shift+C",
-                "Shift+Ctrl+C",
-                "Ctrl+Shift+Space",
-                "Alt+Q",
-            ];
-            let mut plugin_results = Vec::new();
-            for sc in &shortcuts_to_try {
-                if let Ok(shortcut) = sc.parse::<Shortcut>() {
-                    match app.global_shortcut().register(shortcut) {
-                        Ok(_) => plugin_results.push(format!("{}: REGISTERED", sc)),
-                        Err(e) => plugin_results.push(format!("{}: FAILED({:?})", sc, e)),
-                    }
-                }
-            }
-
             let primary_shortcut = "Shift+Ctrl+C / F14";
 
             let _ = std::fs::write(
                 "focusdeck_status.log",
                 format!(
-                    "FocusDeck Active.\nPrimary Shortcuts: Shift+Ctrl+C / F14 (fallback Alt+Q)\nGlobal Plugin Shortcuts: {:?}\nAutostart: {}\n",
-                    plugin_results,
+                    "FocusDeck Active.\nPrimary Shortcuts: Shift+Ctrl+C / F14 (fallback Alt+Q)\nMWB Multi-Machine Support: ENABLED\nAutostart: {}\n",
                     autostart::is_autostart_enabled()
                 ),
             );
