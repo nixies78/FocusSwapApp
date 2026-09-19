@@ -148,10 +148,11 @@ unsafe extern "system" fn low_level_keyboard_proc(
                 || (kbd.flags.0 & 0x20 != 0);
 
             // Determine if the key matches any of our trigger shortcuts
+            // NOTE: Only F14 (0x7D) is matched. Range 0x7C..=0x87 (F13-F24) was previously used but triggered on F20.
             let matched_source = if (vk == 0x43 || vk == 0x63) && is_ctrl && is_shift {
                 Some("Native Hook: Shift+Ctrl+C")
-            } else if vk >= 0x7C && vk <= 0x87 {
-                Some("Native Hook: Extended Function Key (F13-F24)")
+            } else if vk == 0x7D {
+                Some("Native Hook: F14")
             } else if vk == VK_SPACE.0 as u32 && is_ctrl && is_shift && !is_alt {
                 Some("Native Hook: Ctrl+Shift+Space")
             } else if vk == 0x51 && is_alt && !is_ctrl {
