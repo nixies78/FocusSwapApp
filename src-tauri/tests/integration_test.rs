@@ -29,14 +29,28 @@ fn test_hook_result() {
         println!("Virtual Screen: ({}, {}) {}x{}", v_left, v_top, v_width, v_height);
 
         let hmon = windows::Win32::Graphics::Gdi::MonitorFromPoint(pt, windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTONULL);
-        println!("MonitorFromPoint (NULL): {:?}", hmon);
     }
+}
 
-    use tauri_plugin_global_shortcut::Shortcut;
-    for sc in &["Ctrl+Shift+C", "Shift+Ctrl+C", "F14", "Ctrl+Shift+Space", "Alt+Q"] {
-        match sc.parse::<Shortcut>() {
-            Ok(s) => println!("Parsed '{}' -> {:?}", sc, s),
-            Err(e) => println!("FAILED to parse '{}': {:?}", sc, e),
-        }
+#[test]
+fn test_register_hotkey() {
+    unsafe {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_NOREPEAT,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetMessageW, PeekMessageW, MSG, PM_NOREMOVE, WM_HOTKEY,
+        };
+
+        let mut msg = MSG::default();
+        let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
+
+        let ok = RegisterHotKey(None, 999, HOT_KEY_MODIFIERS(MOD_ALT.0 | MOD_NOREPEAT.0), 0x51);
+        println!("RegisterHotKey Alt+Q result: {:?}", ok);
+        assert!(ok.is_ok());
+
+        let unreg = UnregisterHotKey(None, 999);
+        println!("UnregisterHotKey result: {:?}", unreg);
+        assert!(unreg.is_ok());
     }
 }
