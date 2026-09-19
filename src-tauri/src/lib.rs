@@ -14,23 +14,21 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, State,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
-use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT, VK_SPACE,
+    GetAsyncKeyState, RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL,
+    MOD_NOREPEAT, MOD_SHIFT, VK_CONTROL, VK_MENU, VK_SHIFT, VK_SPACE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetCursorInfo, GetCursorPos, GetMessageW, GetSystemMetrics,
-    PeekMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, CURSORINFO,
-    KBDLLHOOKSTRUCT, MSG, PM_NOREMOVE, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-    SM_YVIRTUALSCREEN, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    DispatchMessageW, GetCursorInfo, GetCursorPos, GetMessageW, GetSystemMetrics, PeekMessageW,
+    TranslateMessage, CURSORINFO, MSG, PM_NOREMOVE, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, WM_HOTKEY,
 };
 
 static GLOBAL_APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
-static CTRL_PRESSED: AtomicBool = AtomicBool::new(false);
-static SHIFT_PRESSED: AtomicBool = AtomicBool::new(false);
-static ALT_PRESSED: AtomicBool = AtomicBool::new(false);
+static LAST_TRIGGER_MILLIS: AtomicU64 = AtomicU64::new(0);
 
 fn log_status(msg: &str) {
     let now = chrono_or_simple_timestamp();
@@ -56,7 +54,30 @@ fn chrono_or_simple_timestamp() -> String {
     format!("{:02}:{:02}:{:02}.{:03}", hours, mins, s, millis)
 }
 
+fn can_trigger_now() -> bool {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let last = LAST_TRIGGER_MILLIS.load(Ordering::SeqCst);
+    if now.saturating_sub(last) >= 250 {
+        LAST_TRIGGER_MILLIS.store(now, Ordering::SeqCst);
+        true
+    } else {
+        false
+    }
+}
+
 fn trigger_toggle_overlay(source: &'static str) {
+    if !can_trigger_now() {
+        return;
+    }
+
+    if !is_cursor_on_local_machine() {
+        log_status(&format!("[{}] Ignored: cursor is on remote machine (MWB active)", source));
+        return;
+    }
+
     log_status(&format!("[{}] Triggered toggle_overlay", source));
 
     if let Some(app) = GLOBAL_APP_HANDLE.get() {
@@ -94,144 +115,133 @@ fn is_cursor_on_local_machine() -> bool {
 
         let is_remote = cursor_hidden || at_outer_edge || (parked_at_origin && cursor_hidden);
 
-        log_status(&format!(
-            "[MWB-CHECK] pt=({},{}) hidden={} at_edge={} parked={} → local={}",
-            pt.x, pt.y, cursor_hidden, at_outer_edge, parked_at_origin, !is_remote
-        ));
-
         !is_remote
     }
 }
 
-unsafe extern "system" fn low_level_keyboard_proc(
-    n_code: i32,
-    w_param: WPARAM,
-    l_param: LPARAM,
-) -> LRESULT {
-    if n_code >= 0 {
-        let msg = w_param.0 as u32;
-        let kbd = &*(l_param.0 as *const KBDLLHOOKSTRUCT);
-        let vk = kbd.vkCode;
+fn start_native_hotkey_listener(app: AppHandle) {
+    let _ = GLOBAL_APP_HANDLE.set(app.clone());
 
-        // Dynamically track modifier states (crucial for synthetic/injected mouse macro keystrokes)
-        if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
-            if vk == 0x10 || vk == 0xA0 || vk == 0xA1 {
-                SHIFT_PRESSED.store(true, Ordering::SeqCst);
-            }
-            if vk == 0x11 || vk == 0xA2 || vk == 0xA3 {
-                CTRL_PRESSED.store(true, Ordering::SeqCst);
-            }
-            if vk == 0x12 || vk == 0xA4 || vk == 0xA5 {
-                ALT_PRESSED.store(true, Ordering::SeqCst);
-            }
-        } else if msg == WM_KEYUP || msg == WM_SYSKEYUP {
-            if vk == 0x10 || vk == 0xA0 || vk == 0xA1 {
-                SHIFT_PRESSED.store(false, Ordering::SeqCst);
-            }
-            if vk == 0x11 || vk == 0xA2 || vk == 0xA3 {
-                CTRL_PRESSED.store(false, Ordering::SeqCst);
-            }
-            if vk == 0x12 || vk == 0xA4 || vk == 0xA5 {
-                ALT_PRESSED.store(false, Ordering::SeqCst);
-            }
-        }
-
-        if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
-            let is_ctrl = CTRL_PRESSED.load(Ordering::SeqCst)
-                || (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0)
-                || (GetAsyncKeyState(0x11) as u16 & 0x8000 != 0);
-            let is_shift = SHIFT_PRESSED.load(Ordering::SeqCst)
-                || (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0)
-                || (GetAsyncKeyState(0x10) as u16 & 0x8000 != 0);
-            let is_alt = ALT_PRESSED.load(Ordering::SeqCst)
-                || (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000 != 0)
-                || (kbd.flags.0 & 0x20 != 0);
-
-            // Log any extended function key (F13-F24) so we see exactly what the mouse emits
-            if vk >= 0x7C && vk <= 0x87 {
-                log_status(&format!("[KEY-SEEN] Extended Function Key vk=0x{:X} (F{})", vk, vk - 0x70 + 1));
-            }
-
-            // CRITICAL: F20 (0x83) is strictly reserved for Help Respond. NEVER intercept or swallow!
-            if vk == 0x83 {
-                return CallNextHookEx(None, n_code, w_param, l_param);
-            }
-
-            // Determine if the key matches any of our trigger shortcuts:
-            // - Shift+Ctrl+C (Razer mouse macro)
-            // - F14 (0x7D), F13 (0x7C), F15 (0x7E)
-            // - Ctrl+Shift+Space
-            // - Alt+Q (fallback)
-            let matched_source = if (vk == 0x43 || vk == 0x63) && is_ctrl && is_shift {
-                Some("Native Hook: Shift+Ctrl+C")
-            } else if vk == 0x7D {
-                Some("Native Hook: F14")
-            } else if vk == 0x7C {
-                Some("Native Hook: F13")
-            } else if vk == 0x7E {
-                Some("Native Hook: F15")
-            } else if vk == VK_SPACE.0 as u32 && is_ctrl && is_shift && !is_alt {
-                Some("Native Hook: Ctrl+Shift+Space")
-            } else if vk == 0x51 && is_alt && !is_ctrl {
-                Some("Native Hook: Alt+Q")
-            } else {
-                None
-            };
-
-            if let Some(source) = matched_source {
-                // Check if mouse cursor is on local machine (Mouse Without Borders multi-machine support)
-                if !is_cursor_on_local_machine() {
-                    log_status(&format!(
-                        "[{}] FORWARDING: mouse cursor is remote. Passing key to MWB!",
-                        source
-                    ));
-                    // DO NOT swallow or trigger overlay! Let Mouse Without Borders forward the key across the network!
-                    return CallNextHookEx(None, n_code, w_param, l_param);
-                }
-
-                trigger_toggle_overlay(source);
-                return LRESULT(1);
-            }
-        }
-    }
-    CallNextHookEx(None, n_code, w_param, l_param)
-}
-
-fn start_native_hotkey_hook(app: AppHandle) {
-    let _ = GLOBAL_APP_HANDLE.set(app);
-
+    // 1. Dedicated Win32 RegisterHotKey message loop thread (Zero global hooks, zero lag)
     std::thread::spawn(|| {
         unsafe {
-            // Force creation of message queue for this worker thread
             let mut msg = MSG::default();
             let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
 
-            let hmod = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
-            let hook = SetWindowsHookExW(
-                WH_KEYBOARD_LL,
-                Some(low_level_keyboard_proc),
-                hmod,
-                0,
-            );
+            // Hotkeys explicitly configured:
+            // - Shift+Ctrl+C (Razer Synapse mouse button 3)
+            // - F14 (Requested function key)
+            // - F13 (Razer Synapse mouse button 2)
+            // - F15
+            // - Ctrl+Shift+Space
+            // - Alt+Q (Standard fallback)
+            // CRITICAL: F20 (0x83) is NEVER registered! Strictly reserved for Help Respond!
+            // CRITICAL: Alt+Space is NEVER registered! Strictly reserved for PowerToys Run!
+            let hotkeys: [(i32, &'static str, HOT_KEY_MODIFIERS, u32); 6] = [
+                (101, "Win32 Hotkey: Shift+Ctrl+C", HOT_KEY_MODIFIERS(MOD_CONTROL.0 | MOD_SHIFT.0 | MOD_NOREPEAT.0), 0x43),
+                (102, "Win32 Hotkey: F14", HOT_KEY_MODIFIERS(MOD_NOREPEAT.0), 0x7D),
+                (103, "Win32 Hotkey: F13", HOT_KEY_MODIFIERS(MOD_NOREPEAT.0), 0x7C),
+                (104, "Win32 Hotkey: F15", HOT_KEY_MODIFIERS(MOD_NOREPEAT.0), 0x7E),
+                (105, "Win32 Hotkey: Ctrl+Shift+Space", HOT_KEY_MODIFIERS(MOD_CONTROL.0 | MOD_SHIFT.0 | MOD_NOREPEAT.0), VK_SPACE.0 as u32),
+                (106, "Win32 Hotkey: Alt+Q", HOT_KEY_MODIFIERS(MOD_ALT.0 | MOD_NOREPEAT.0), 0x51),
+            ];
 
-            match hook {
-                Ok(h) => {
-                    log_status(&format!("Native WH_KEYBOARD_LL hook active with hmod: {:?}", hmod));
-
-                    let mut msg = MSG::default();
-                    while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-                        let _ = TranslateMessage(&msg);
-                        DispatchMessageW(&msg);
+            let mut registered_ids = Vec::new();
+            for (id, name, mods, vk) in hotkeys {
+                match RegisterHotKey(None, id, mods, vk) {
+                    Ok(_) => {
+                        registered_ids.push(id);
+                        log_status(&format!("Successfully registered Win32 RegisterHotKey: {} (ID {})", name, id));
                     }
-                    let _ = UnhookWindowsHookEx(h);
+                    Err(e) => {
+                        log_status(&format!("Failed to register Win32 RegisterHotKey: {} (ID {}): {:?}", name, id, e));
+                    }
                 }
-                Err(e) => {
-                    log_status(&format!("ERROR: SetWindowsHookExW failed: {:?}", e));
+            }
+
+            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                if msg.message == WM_HOTKEY {
+                    let id = msg.wParam.0 as i32;
+                    let source = match id {
+                        101 => "Win32 Hotkey: Shift+Ctrl+C",
+                        102 => "Win32 Hotkey: F14",
+                        103 => "Win32 Hotkey: F13",
+                        104 => "Win32 Hotkey: F15",
+                        105 => "Win32 Hotkey: Ctrl+Shift+Space",
+                        106 => "Win32 Hotkey: Alt+Q",
+                        _ => "Win32 Hotkey: Unknown",
+                    };
+                    trigger_toggle_overlay(source);
                 }
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+
+            for id in registered_ids {
+                let _ = UnregisterHotKey(None, id);
+            }
+        }
+    });
+
+    // 2. Dedicated GetAsyncKeyState Polling Thread (15ms loop)
+    // Catches mouse buttons (Mouse 4/5) and synthetic driver keystrokes without hooks
+    std::thread::spawn(|| {
+        let mut was_xbtn1 = false;
+        let mut was_xbtn2 = false;
+        let mut was_f14 = false;
+        let mut was_f13 = false;
+        let mut was_shift_ctrl_c = false;
+        let mut was_alt_q = false;
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(15));
+
+            unsafe {
+                let is_ctrl = (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0;
+                let is_shift = (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0;
+                let is_alt = (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0;
+
+                let c_down = (GetAsyncKeyState(0x43) as u16 & 0x8000) != 0;
+                let q_down = (GetAsyncKeyState(0x51) as u16 & 0x8000) != 0;
+                let f14_down = (GetAsyncKeyState(0x7D) as u16 & 0x8000) != 0;
+                let f13_down = (GetAsyncKeyState(0x7C) as u16 & 0x8000) != 0;
+                let xbtn1_down = (GetAsyncKeyState(0x05) as u16 & 0x8000) != 0; // Mouse 4
+                let xbtn2_down = (GetAsyncKeyState(0x06) as u16 & 0x8000) != 0; // Mouse 5
+
+                let is_shift_ctrl_c = c_down && is_ctrl && is_shift;
+                let is_alt_q = q_down && is_alt && !is_ctrl;
+
+                // Detect rising edges (button/key just pressed down)
+                if xbtn1_down && !was_xbtn1 {
+                    trigger_toggle_overlay("Mouse Poller: Mouse 4 (XBUTTON1)");
+                }
+                if xbtn2_down && !was_xbtn2 {
+                    trigger_toggle_overlay("Mouse Poller: Mouse 5 (XBUTTON2)");
+                }
+                if f14_down && !was_f14 {
+                    trigger_toggle_overlay("Key Poller: F14");
+                }
+                if f13_down && !was_f13 {
+                    trigger_toggle_overlay("Key Poller: F13");
+                }
+                if is_shift_ctrl_c && !was_shift_ctrl_c {
+                    trigger_toggle_overlay("Key Poller: Shift+Ctrl+C");
+                }
+                if is_alt_q && !was_alt_q {
+                    trigger_toggle_overlay("Key Poller: Alt+Q");
+                }
+
+                was_xbtn1 = xbtn1_down;
+                was_xbtn2 = xbtn2_down;
+                was_f14 = f14_down;
+                was_f13 = f13_down;
+                was_shift_ctrl_c = is_shift_ctrl_c;
+                was_alt_q = is_alt_q;
             }
         }
     });
 }
+
 
 fn toggle_overlay(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -464,13 +474,13 @@ pub fn run() {
             let primary_shortcut = "Shift+Ctrl+C / F14";
 
             log_status(&format!(
-                "FocusDeck v{} Active | Shortcuts: Shift+Ctrl+C / F14 (fallback Alt+Q) | MWB: ENABLED | Autostart: {}",
+                "FocusDeck v{} Active | Shortcuts: Shift+Ctrl+C / F14 / F13 / Mouse4/5 (fallback Alt+Q) | Conflict-Free RegisterHotKey + Polling (Zero Hooks) | Autostart: {}",
                 version,
                 autostart::is_autostart_enabled()
             ));
 
-            // Start native keyboard hook with F20 exclusion and key-seen logging
-            start_native_hotkey_hook(app.handle().clone());
+            // Start conflict-free native Win32 hotkey listener and mouse poller
+            start_native_hotkey_listener(app.handle().clone());
 
             // Register Tray Icon & Menu
             let toggle_label = format!("Toggle FocusDeck v{} ({})", version, primary_shortcut);

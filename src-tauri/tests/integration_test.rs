@@ -1,12 +1,3 @@
-use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, SetWindowsHookExW, WH_KEYBOARD_LL,
-};
-use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
-
-unsafe extern "system" fn dummy_proc(n_code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
-    CallNextHookEx(None, n_code, w_param, l_param)
-}
-
 #[test]
 fn test_hook_result() {
     unsafe {
