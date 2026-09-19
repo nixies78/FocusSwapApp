@@ -37,10 +37,17 @@ static LAST_TRIGGER_MILLIS: AtomicU64 = AtomicU64::new(0);
 static HOOK_THREAD_ALIVE: AtomicBool = AtomicBool::new(false);
 static TOTAL_TRIGGERS: AtomicU64 = AtomicU64::new(0);
 static LAST_TRIGGER_SOURCE: OnceLock<std::sync::Mutex<String>> = OnceLock::new();
+static MY_COMPUTER_NAME: OnceLock<String> = OnceLock::new();
 
 // Multi-machine peer cursor sync
 static LAST_LOCAL_MOUSE_MOVE: AtomicU64 = AtomicU64::new(0);
 static LAST_REMOTE_MOUSE_MOVE: AtomicU64 = AtomicU64::new(0);
+
+fn get_my_computer_name() -> &'static str {
+    MY_COMPUTER_NAME.get_or_init(|| {
+        std::env::var("COMPUTERNAME").unwrap_or_else(|_| "UNKNOWN".to_string())
+    })
+}
 
 fn log_status(msg: &str) {
     let now = chrono_or_simple_timestamp();
@@ -115,15 +122,6 @@ fn trigger_toggle_overlay(source: &'static str) {
     }
 }
 
-fn send_remote_trigger() {
-    std::thread::spawn(|| {
-        if let Ok(socket) = std::net::UdpSocket::bind(("0.0.0.0", 0)) {
-            let _ = socket.set_broadcast(true);
-            let _ = socket.send_to(b"FOCUSDECK:TRIGGER", ("255.255.255.255", PEER_PORT));
-        }
-    });
-}
-
 fn is_cursor_on_local_machine() -> bool {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -136,8 +134,8 @@ fn is_cursor_on_local_machine() -> bool {
     let local_elapsed = now.saturating_sub(local_move);
     let remote_elapsed = now.saturating_sub(remote_move);
 
-    // 1. Peer Sync: If remote machine had mouse activity within 15 seconds, and it is more recent than local:
-    if remote_move > 0 && remote_elapsed < 15_000 && remote_elapsed < local_elapsed {
+    // 1. Peer Sync: If remote machine had more recent mouse activity, this machine is INACTIVE
+    if remote_move > 0 && remote_elapsed < local_elapsed {
         log_status(&format!(
             "[MWB-CHECK] Peer Sync: Remote mouse moved {}ms ago, Local moved {}ms ago -> REMOTE ACTIVE",
             remote_elapsed, local_elapsed
@@ -185,11 +183,11 @@ fn is_cursor_on_local_machine() -> bool {
 // =============================================================================
 // WH_KEYBOARD_LL Hook Proc — PROVEN WORKING in v0.2.1 (90+ triggers in log)
 // =============================================================================
-// Changes from v0.2.1:
+// Changes:
 //   1. F20 (0x83) is EXCLUDED — reserved for Help Respond
 //   2. 250ms debounce via can_trigger_now()
 //   3. Diagnostic heartbeat thread monitors hook health
-//   4. Multi-machine peer sync via UDP so hotkeys trigger on the ACTIVE machine
+//   4. Multi-machine peer sync via UDP so hotkeys trigger ONLY on the ACTIVE machine
 // =============================================================================
 unsafe extern "system" fn low_level_keyboard_proc(
     n_code: i32,
@@ -254,12 +252,10 @@ unsafe extern "system" fn low_level_keyboard_proc(
                 // Check if mouse cursor is on local machine (Mouse Without Borders multi-machine support)
                 if !is_cursor_on_local_machine() {
                     log_status(&format!(
-                        "[{}] FORWARDING: mouse cursor is remote. Passing key to MWB and notifying peer!",
+                        "[{}] FORWARDING: mouse cursor is remote. Passing key to MWB!",
                         source
                     ));
-                    // Send instant UDP trigger to peer machine so it opens immediately
-                    send_remote_trigger();
-                    // DO NOT swallow! Let Mouse Without Borders also forward the key across the network!
+                    // DO NOT swallow! Let Mouse Without Borders forward the key across the network!
                     return CallNextHookEx(None, n_code, w_param, l_param);
                 }
 
@@ -354,6 +350,8 @@ fn start_native_hotkey_hook(app: AppHandle) {
 }
 
 fn start_peer_sync() {
+    let my_name = get_my_computer_name().to_string();
+
     // 1. Local mouse movement tracking thread (polls GetCursorPos every 50ms)
     std::thread::spawn(|| {
         let mut last_pt = POINT::default();
@@ -376,7 +374,8 @@ fn start_peer_sync() {
     });
 
     // 2. UDP listener thread for peer sync messages
-    std::thread::spawn(|| {
+    let my_name_c = my_name.clone();
+    std::thread::spawn(move || {
         let socket = match std::net::UdpSocket::bind(("0.0.0.0", PEER_PORT)) {
             Ok(s) => s,
             Err(e) => {
@@ -389,18 +388,17 @@ fn start_peer_sync() {
 
         let mut buf = [0u8; 128];
         loop {
-            if let Ok((len, src)) = socket.recv_from(&mut buf) {
+            if let Ok((len, _src)) = socket.recv_from(&mut buf) {
                 if let Ok(msg) = std::str::from_utf8(&buf[..len]) {
-                    if msg.starts_with("FOCUSDECK:MOUSE") {
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
-                        LAST_REMOTE_MOUSE_MOVE.store(now, Ordering::SeqCst);
-                    } else if msg.starts_with("FOCUSDECK:TRIGGER") {
-                        log_diag(&format!("Received remote TRIGGER from peer {}", src));
-                        log_status(&format!("[Peer Trigger] Received remote TRIGGER from {}", src));
-                        trigger_toggle_overlay("Remote Peer Trigger");
+                    if let Some(sender) = msg.strip_prefix("FOCUSDECK:MOUSE:") {
+                        // CRITICAL: Ignore own loopback broadcasts!
+                        if sender != my_name_c {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+                            LAST_REMOTE_MOUSE_MOVE.store(now, Ordering::SeqCst);
+                        }
                     }
                 }
             }
@@ -408,7 +406,7 @@ fn start_peer_sync() {
     });
 
     // 3. Periodic UDP broadcast of local mouse activity
-    std::thread::spawn(|| {
+    std::thread::spawn(move || {
         let socket = match std::net::UdpSocket::bind(("0.0.0.0", 0)) {
             Ok(s) => s,
             Err(_) => return,
@@ -416,6 +414,9 @@ fn start_peer_sync() {
         let _ = socket.set_broadcast(true);
 
         let mut last_broadcast_time = 0u64;
+        let packet = format!("FOCUSDECK:MOUSE:{}", my_name);
+        let packet_bytes = packet.as_bytes();
+
         loop {
             std::thread::sleep(std::time::Duration::from_millis(200));
             let local_move = LAST_LOCAL_MOUSE_MOVE.load(Ordering::SeqCst);
@@ -427,7 +428,7 @@ fn start_peer_sync() {
             // If local mouse moved within the last 500ms, and we haven't broadcast in 200ms:
             if now.saturating_sub(local_move) < 500 && now.saturating_sub(last_broadcast_time) >= 200 {
                 last_broadcast_time = now;
-                let _ = socket.send_to(b"FOCUSDECK:MOUSE", ("255.255.255.255", PEER_PORT));
+                let _ = socket.send_to(packet_bytes, ("255.255.255.255", PEER_PORT));
             }
         }
     });
@@ -664,14 +665,15 @@ pub fn run() {
             let primary_shortcut = "Shift+Ctrl+C / F14";
 
             log_status(&format!(
-                "FocusDeck v{} Active | Shortcuts: Shift+Ctrl+C / F13-F24 (NOT F20) / Ctrl+Shift+Space / Alt+Q | Peer Sync Enabled (UDP {}) | Autostart: {}",
+                "FocusDeck v{} Active | Shortcuts: Shift+Ctrl+C / F13-F24 (NOT F20) / Ctrl+Shift+Space / Alt+Q | Peer Sync: ENABLED (UDP {}) | Machine: {} | Autostart: {}",
                 version,
                 PEER_PORT,
+                get_my_computer_name(),
                 autostart::is_autostart_enabled()
             ));
             log_diag(&format!(
-                "STARTUP v{} | Architecture: WH_KEYBOARD_LL + Peer Sync (Port {}) | F20 excluded | Debounce: 250ms",
-                version, PEER_PORT
+                "STARTUP v{} | Architecture: WH_KEYBOARD_LL + Peer Sync (Port {}) | Machine: {} | F20 excluded | Debounce: 250ms",
+                version, PEER_PORT, get_my_computer_name()
             ));
 
             // Start the PROVEN WH_KEYBOARD_LL hook
