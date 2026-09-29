@@ -525,6 +525,103 @@ pub fn execute_preset(
     Ok(())
 }
 
+/// Launch a single bookmark action (web URL, application, or folder)
+pub fn launch_single_action(action: &Action) -> Result<(), String> {
+    info!("Launching single bookmark action: {} {:?}", action.executable, action.args);
+
+    let mut exe_to_run = resolve_executable(&action.executable);
+    let mut args_to_run = action.args.clone();
+
+    // Check if launching File Explorer
+    let is_explorer = exe_to_run.to_lowercase().contains("explorer");
+    if is_explorer {
+        let raw_target = args_to_run.first().cloned().unwrap_or_else(|| {
+            action.title.clone().unwrap_or_default()
+        });
+        let resolved = crate::win32_layout::resolve_folder_path(&raw_target);
+        args_to_run = vec![resolved];
+    }
+
+    // Check if launching Chrome / Web App
+    let is_chrome = exe_to_run.eq_ignore_ascii_case("chrome.exe")
+        || exe_to_run.eq_ignore_ascii_case("chrome");
+
+    if is_chrome {
+        if let Some(chrome_path) = find_chrome_executable() {
+            exe_to_run = chrome_path.to_string_lossy().to_string();
+        } else {
+            warn!("Could not locate chrome.exe, attempting default PATH resolution");
+        }
+    }
+
+    // Check if ApplicationFrameHost (Windows UWP / Modern App)
+    if exe_to_run.to_lowercase().contains("applicationframehost") {
+        let title_check = action.title.as_deref().unwrap_or("").to_lowercase();
+        if title_check.contains("calc") {
+            exe_to_run = "calc.exe".to_string();
+        }
+    }
+
+    let is_chrome_app = action.is_chrome_app.unwrap_or(false)
+        || action.args.iter().any(|a| a.starts_with("--app="));
+
+    let pre_existing_hwnds = crate::win32_layout::get_all_visible_hwnds();
+
+    let mut cmd = Command::new(&exe_to_run);
+    for arg in &args_to_run {
+        let clean = arg.trim();
+        let normalized = if clean.starts_with("--") && clean.contains('=') {
+            let parts: Vec<&str> = clean.splitn(2, '=').collect();
+            let key = parts[0];
+            let val = parts[1].trim();
+            let clean_val = val.trim_matches('"').trim_matches('\'');
+            format!("{}={}", key, clean_val)
+        } else if (clean.starts_with('"') && clean.ends_with('"')) || (clean.starts_with('\'') && clean.ends_with('\'')) {
+            clean[1..clean.len() - 1].to_string()
+        } else {
+            clean.to_string()
+        };
+        cmd.arg(&normalized);
+    }
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn {}: {}", exe_to_run, e))?;
+
+    let child_pid = child.id();
+    let placement_opt = action.placement.clone();
+    let title_hint = get_title_keyword(action);
+    let fallback_title = if exe_to_run.to_lowercase().contains("notepad") {
+        Some("Notepad".to_string())
+    } else if exe_to_run.to_lowercase().contains("calc") {
+        Some("Calculator".to_string())
+    } else {
+        None
+    };
+
+    let target_pid = if is_explorer { None } else { Some(child_pid) };
+
+    std::thread::spawn(move || {
+        let hwnd_opt = wait_for_window(
+            target_pid,
+            title_hint.as_deref().or(fallback_title.as_deref()),
+            Some(&pre_existing_hwnds),
+            is_chrome_app,
+            Duration::from_millis(3000),
+        );
+
+        if let Some(hwnd) = hwnd_opt {
+            if let Some(ref placement) = placement_opt {
+                let _ = apply_placement(hwnd, placement);
+            } else {
+                force_foreground_window(hwnd);
+            }
+        }
+    });
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

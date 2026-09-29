@@ -609,6 +609,21 @@ fn save_cleanup_config(cleanup: config::CleanupConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_bookmarks() -> Result<config::BookmarkConfig, String> {
+    config::get_bookmarks_config()
+}
+
+#[tauri::command]
+fn save_bookmarks(bookmarks: config::BookmarkConfig) -> Result<(), String> {
+    config::save_bookmarks_config(bookmarks)
+}
+
+#[tauri::command]
+fn execute_bookmark(action: config::Action) -> Result<(), String> {
+    launcher::launch_single_action(&action)
+}
+
+#[tauri::command]
 fn execute_smart_cleanup() -> Result<win32_layout::CleanupSummary, String> {
     win32_layout::execute_smart_cleanup()
 }
@@ -788,6 +803,9 @@ pub fn run() {
             get_chrome_profiles,
             get_cleanup_config,
             save_cleanup_config,
+            get_bookmarks,
+            save_bookmarks,
+            execute_bookmark,
             execute_smart_cleanup,
             update_and_restart,
         ])

@@ -87,3 +87,32 @@ export interface CleanupSummary {
   kept: number;
 }
 
+export interface Bookmark {
+  id: string;
+  name: string;
+  category_id: string;
+  icon_id?: string;
+  custom_svg?: string;
+  action: Action;
+  order: number;
+}
+
+export interface BookmarkCategory {
+  id: string;
+  name: string;
+  order: number;
+}
+
+export interface SvgIconEntry {
+  id: string;
+  name: string;
+  svg: string;
+  tags?: string[];
+}
+
+export interface BookmarkConfig {
+  categories: BookmarkCategory[];
+  bookmarks: Bookmark[];
+  custom_svgs: SvgIconEntry[];
+}
+

@@ -14,8 +14,10 @@ import {
   ArrowLeft,
   X,
   Folder,
+  Bookmark as BookmarkIcon,
 } from 'lucide-react';
 import { Action, CapturedLayout, MonitorInfo, Placement, Preset, SwitchAwayAction, ChromeProfile } from '../types';
+import ConvertToBookmarkModal from './ConvertToBookmarkModal';
 
 interface WorkspaceEditorProps {
   initialPreset?: Preset | null;
@@ -51,6 +53,9 @@ export default function WorkspaceEditor({
   );
   const [createDesktopShortcut, setCreateDesktopShortcut] = useState(false);
   const [moveExistingWindows, setMoveExistingWindows] = useState(true);
+  const [bookmarkAction, setBookmarkAction] = useState<Action | null>(null);
+  const [isBookmarkModalOpen, setIsBookmarkModalOpen] = useState(false);
+  const [bookmarkToast, setBookmarkToast] = useState<string | null>(null);
 
   const availableParents = useMemo(() => {
     // If current preset has children, it cannot be nested under another (1-level deep limit)
@@ -393,7 +398,12 @@ export default function WorkspaceEditor({
     return (
       <div
         key={index}
-        className="bg-[#181824] border border-slate-800 rounded-xl overflow-hidden shadow-sm transition"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setBookmarkAction(act);
+          setIsBookmarkModalOpen(true);
+        }}
+        className="bg-[#181824] border border-slate-800 hover:border-slate-700/90 rounded-xl overflow-hidden shadow-sm transition"
       >
         <div className="flex items-center justify-between p-3.5 hover:bg-slate-800/30 transition">
           <div
@@ -483,7 +493,20 @@ export default function WorkspaceEditor({
             </div>
           </div>
 
-          <div className="flex items-center space-x-3 shrink-0 pl-3">
+          <div className="flex items-center space-x-2 shrink-0 pl-3">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setBookmarkAction(act);
+                setIsBookmarkModalOpen(true);
+              }}
+              className="px-2.5 py-1 text-xs font-medium text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 rounded-lg border border-cyan-500/30 transition flex items-center space-x-1 cursor-pointer"
+              title="Convert to Left-Hand Bookmark (or right-click this card)"
+            >
+              <BookmarkIcon className="w-3 h-3" />
+              <span>Bookmark</span>
+            </button>
             <button
               onClick={() => handleRemoveAction(index)}
               className="px-2.5 py-1 text-xs font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg border border-rose-500/20 transition flex items-center space-x-1 cursor-pointer"
@@ -1010,6 +1033,28 @@ export default function WorkspaceEditor({
           </button>
         </div>
       </div>
+
+      {/* Convert to Bookmark Modal */}
+      <ConvertToBookmarkModal
+        isOpen={isBookmarkModalOpen}
+        action={bookmarkAction}
+        onClose={() => {
+          setIsBookmarkModalOpen(false);
+          setBookmarkAction(null);
+        }}
+        onSuccess={(bmName) => {
+          setBookmarkToast(`Added "${bmName}" to Left-Hand Bookmarks!`);
+          setTimeout(() => setBookmarkToast(null), 3500);
+        }}
+      />
+
+      {/* Toast Notification */}
+      {bookmarkToast && (
+        <div className="fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-xl bg-cyan-950/90 border border-cyan-500/50 text-cyan-200 text-xs font-semibold shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150 flex items-center space-x-2">
+          <BookmarkIcon className="w-4 h-4 text-cyan-400" />
+          <span>{bookmarkToast}</span>
+        </div>
+      )}
     </div>
   );
 }

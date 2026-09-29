@@ -81,16 +81,81 @@ impl Default for CleanupConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Bookmark {
+    pub id: String,
+    pub name: String,
+    pub category_id: String,
+    #[serde(default)]
+    pub icon_id: Option<String>,
+    #[serde(default)]
+    pub custom_svg: Option<String>,
+    pub action: Action,
+    #[serde(default)]
+    pub order: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BookmarkCategory {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub order: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SvgIconEntry {
+    pub id: String,
+    pub name: String,
+    pub svg: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BookmarkConfig {
+    #[serde(default)]
+    pub categories: Vec<BookmarkCategory>,
+    #[serde(default)]
+    pub bookmarks: Vec<Bookmark>,
+    #[serde(default)]
+    pub custom_svgs: Vec<SvgIconEntry>,
+}
+
+impl Default for BookmarkConfig {
+    fn default() -> Self {
+        Self {
+            categories: vec![
+                BookmarkCategory {
+                    id: "work".to_string(),
+                    name: "Work".to_string(),
+                    order: 0,
+                },
+                BookmarkCategory {
+                    id: "general".to_string(),
+                    name: "General".to_string(),
+                    order: 1,
+                },
+            ],
+            bookmarks: Vec::new(),
+            custom_svgs: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceConfig {
     pub presets: Vec<Preset>,
     #[serde(default)]
     pub cleanup: Option<CleanupConfig>,
+    #[serde(default)]
+    pub bookmarks: Option<BookmarkConfig>,
 }
 
 impl Default for WorkspaceConfig {
     fn default() -> Self {
         Self {
             cleanup: Some(CleanupConfig::default()),
+            bookmarks: Some(BookmarkConfig::default()),
             presets: vec![
                 Preset {
                     id: "calendar".to_string(),
@@ -268,6 +333,7 @@ pub fn save_presets(presets: Vec<Preset>) -> Result<(), String> {
     let mut config = load_config().unwrap_or_else(|_| WorkspaceConfig {
         presets: Vec::new(),
         cleanup: None,
+        bookmarks: None,
     });
     config.presets = presets;
     save_config(&config)
@@ -282,8 +348,24 @@ pub fn save_cleanup_config(cleanup: CleanupConfig) -> Result<(), String> {
     let mut cfg = load_config().unwrap_or_else(|_| WorkspaceConfig {
         presets: Vec::new(),
         cleanup: None,
+        bookmarks: None,
     });
     cfg.cleanup = Some(cleanup);
+    save_config(&cfg)
+}
+
+pub fn get_bookmarks_config() -> Result<BookmarkConfig, String> {
+    let cfg = load_config()?;
+    Ok(cfg.bookmarks.unwrap_or_default())
+}
+
+pub fn save_bookmarks_config(bookmarks: BookmarkConfig) -> Result<(), String> {
+    let mut cfg = load_config().unwrap_or_else(|_| WorkspaceConfig {
+        presets: Vec::new(),
+        cleanup: None,
+        bookmarks: None,
+    });
+    cfg.bookmarks = Some(bookmarks);
     save_config(&cfg)
 }
 
@@ -348,6 +430,7 @@ mod tests {
         assert_eq!(cfg.presets[0].actions[0].args.len(), 2);
         // Should default to "nothing" when missing from JSON
         assert_eq!(cfg.presets[0].on_switch_away, "nothing");
+        assert!(cfg.bookmarks.is_none());
 
         // Test explicit on_switch_away
         let json_with_action = r#"{
@@ -363,5 +446,42 @@ mod tests {
         }"#;
         let cfg2: WorkspaceConfig = serde_json::from_str(json_with_action).unwrap();
         assert_eq!(cfg2.presets[0].on_switch_away, "temp_minimize");
+    }
+
+    #[test]
+    fn test_bookmarks_config_schema() {
+        let json_str = r#"{
+            "presets": [],
+            "bookmarks": {
+                "categories": [
+                    { "id": "work", "name": "Work", "order": 0 }
+                ],
+                "bookmarks": [
+                    {
+                        "id": "bm-1",
+                        "name": "My Homepage",
+                        "category_id": "work",
+                        "icon_id": "globe",
+                        "action": {
+                            "type": "launch",
+                            "executable": "chrome.exe",
+                            "args": ["--new-window", "https://google.com"],
+                            "is_chrome_app": false
+                        },
+                        "order": 0
+                    }
+                ],
+                "custom_svgs": []
+            }
+        }"#;
+
+        let cfg: Result<WorkspaceConfig, _> = serde_json::from_str(json_str);
+        assert!(cfg.is_ok());
+        let cfg = cfg.unwrap();
+        let bm = cfg.bookmarks.unwrap();
+        assert_eq!(bm.categories.len(), 1);
+        assert_eq!(bm.bookmarks.len(), 1);
+        assert_eq!(bm.bookmarks[0].name, "My Homepage");
+        assert_eq!(bm.bookmarks[0].icon_id.as_deref(), Some("globe"));
     }
 }

@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { SlidersHorizontal, X, Sparkles, Layers, RefreshCw, Folder, Settings } from 'lucide-react';
 import { Preset, CleanupSummary } from '../types';
 import { APP_VERSION } from '../version';
+import BookmarkDock from './BookmarkDock';
 
 interface RadialMenuProps {
   presets: Preset[];
@@ -403,6 +404,9 @@ export default function RadialMenu({
           <span>{isUpdating ? 'Updating...' : 'Update & Restart'}</span>
         </button>
       </div>
+
+      {/* Left-Hand Bookmarks Dock (Category boxes with white monochrome SVGs) */}
+      <BookmarkDock onCloseOverlay={onClose} />
 
       {/* Top Right Floating Controls */}
       <div
