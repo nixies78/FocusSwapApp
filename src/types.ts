@@ -26,6 +26,9 @@ export interface Preset {
   on_switch_away?: SwitchAwayAction;
   parent_id?: string;
   actions: Action[];
+  color?: string;
+  icon_id?: string;
+  custom_svg?: string;
 }
 
 export interface MonitorInfo {

@@ -15,8 +15,24 @@ import {
   X,
   Folder,
   Bookmark as BookmarkIcon,
+  Palette,
+  Search,
+  Check,
+  RotateCcw,
+  Sparkles,
 } from 'lucide-react';
-import { Action, CapturedLayout, MonitorInfo, Placement, Preset, SwitchAwayAction, ChromeProfile } from '../types';
+import {
+  Action,
+  CapturedLayout,
+  MonitorInfo,
+  Placement,
+  Preset,
+  SwitchAwayAction,
+  ChromeProfile,
+  BookmarkConfig,
+  SvgIconEntry,
+} from '../types';
+import { BUILTIN_SVGS, getSvgMarkup } from '../utils/svgLibrary';
 import ConvertToBookmarkModal from './ConvertToBookmarkModal';
 
 interface WorkspaceEditorProps {
@@ -51,6 +67,13 @@ export default function WorkspaceEditor({
   const [parentId, setParentId] = useState<string | undefined>(
     initialPreset?.parent_id || defaultParentId || undefined
   );
+  const [color, setColor] = useState(initialPreset?.color || '');
+  const [iconId, setIconId] = useState(initialPreset?.icon_id || '');
+  const [customSvg, setCustomSvg] = useState(initialPreset?.custom_svg || '');
+  const [useIcon, setUseIcon] = useState(Boolean(initialPreset?.icon_id || initialPreset?.custom_svg));
+  const [iconSearch, setIconSearch] = useState('');
+  const [showIconPicker, setShowIconPicker] = useState(false);
+  const [customSvgs, setCustomSvgs] = useState<SvgIconEntry[]>([]);
   const [createDesktopShortcut, setCreateDesktopShortcut] = useState(false);
   const [moveExistingWindows, setMoveExistingWindows] = useState(true);
   const [bookmarkAction, setBookmarkAction] = useState<Action | null>(null);
@@ -168,7 +191,34 @@ export default function WorkspaceEditor({
     invoke<ChromeProfile[]>('get_chrome_profiles')
       .then((profiles) => setChromeProfiles(profiles))
       .catch((err) => console.error('Failed to load Chrome profiles:', err));
+
+    invoke<BookmarkConfig>('get_bookmarks')
+      .then((cfg) => setCustomSvgs(cfg.custom_svgs || []))
+      .catch((err) => console.error('Failed to load bookmarks custom SVGs:', err));
   }, []);
+
+  const parentPreset = useMemo(() => {
+    if (!parentId) return null;
+    return allPresets.find((p) => p.id === parentId) || null;
+  }, [parentId, allPresets]);
+
+  const inheritedColor = parentPreset?.color;
+  const effectiveColor = color || inheritedColor || '';
+
+  const allAvailableIcons = useMemo(() => {
+    const list = [...BUILTIN_SVGS];
+    for (const c of customSvgs) {
+      list.push({
+        id: c.id,
+        name: c.name,
+        category: 'general' as const,
+        svg: c.svg,
+      });
+    }
+    if (!iconSearch.trim()) return list;
+    const q = iconSearch.toLowerCase();
+    return list.filter((i) => i.name.toLowerCase().includes(q) || i.id.toLowerCase().includes(q));
+  }, [customSvgs, iconSearch]);
 
   const toggleExpand = (index: number) => {
     setExpandedIndex((prev) => (prev === index ? null : index));
@@ -333,6 +383,9 @@ export default function WorkspaceEditor({
         name: name.trim(),
         shortcut: shortcut.trim(),
         parent_id: parentId || undefined,
+        color: color.trim() ? color.trim() : undefined,
+        icon_id: useIcon && iconId ? iconId : undefined,
+        custom_svg: useIcon && customSvg ? customSvg : undefined,
         actions,
       };
 
@@ -975,6 +1028,318 @@ export default function WorkspaceEditor({
               />
               <span>Move existing windows</span>
             </label>
+          </div>
+        </div>
+
+        {/* Radial Menu Appearance & Pie Segment Styling */}
+        <div className="bg-[#181824] border border-slate-800/90 rounded-xl p-5 space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/80 pb-3">
+            <div className="flex items-center space-x-2.5">
+              <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+                <Palette className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                  Radial Menu Segment Appearance
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    Pie Slice & Ring
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Choose a slice tint color and display mode (text label or SVG icon)
+                </p>
+              </div>
+            </div>
+
+            {/* Live Segment Preview */}
+            <div className="flex items-center space-x-3 bg-slate-950/80 px-3.5 py-2 rounded-xl border border-slate-800">
+              <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Preview:</span>
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center border transition-all duration-200 shadow-md"
+                style={{
+                  backgroundColor: effectiveColor ? `${effectiveColor}40` : '#1e293b',
+                  borderColor: effectiveColor ? effectiveColor : '#475569',
+                  boxShadow: effectiveColor ? `0 0 12px ${effectiveColor}33` : undefined,
+                }}
+              >
+                {useIcon ? (
+                  <div
+                    className="w-5 h-5 text-white flex items-center justify-center drop-shadow"
+                    dangerouslySetInnerHTML={{
+                      __html: getSvgMarkup(iconId, customSvg),
+                    }}
+                  />
+                ) : (
+                  <span className="text-[11px] font-bold text-white truncate max-w-[34px] px-0.5">
+                    {name.slice(0, 3)}
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-col text-[11px]">
+                <span className="font-semibold text-slate-200 truncate max-w-[120px]">{name}</span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {useIcon ? 'SVG Icon' : 'Text Label'} • {effectiveColor || 'Default Dark'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Color Tint & Inheritance */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <span>Segment Tint Color</span>
+                </label>
+                {parentId && (
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {color ? (
+                      <span className="text-amber-400">Overriding parent tint</span>
+                    ) : inheritedColor ? (
+                      <span className="text-emerald-400">Inheriting from {parentPreset?.name}</span>
+                    ) : (
+                      <span>No parent tint set</span>
+                    )}
+                  </span>
+                )}
+              </div>
+
+              {/* Color Swatches */}
+              <div className="flex items-center flex-wrap gap-2">
+                {[
+                  { label: 'None', hex: '', bg: 'bg-slate-700 hover:bg-slate-600' },
+                  { label: 'Crimson', hex: '#ef4444', bg: 'bg-red-500 hover:bg-red-400' },
+                  { label: 'Orange', hex: '#f97316', bg: 'bg-orange-500 hover:bg-orange-400' },
+                  { label: 'Amber', hex: '#f59e0b', bg: 'bg-amber-500 hover:bg-amber-400' },
+                  { label: 'Green', hex: '#10b981', bg: 'bg-emerald-500 hover:bg-emerald-400' },
+                  { label: 'Teal', hex: '#14b8a6', bg: 'bg-teal-500 hover:bg-teal-400' },
+                  { label: 'Cyan', hex: '#06b6d4', bg: 'bg-cyan-500 hover:bg-cyan-400' },
+                  { label: 'Blue', hex: '#3b82f6', bg: 'bg-blue-500 hover:bg-blue-400' },
+                  { label: 'Indigo', hex: '#6366f1', bg: 'bg-indigo-500 hover:bg-indigo-400' },
+                  { label: 'Purple', hex: '#8b5cf6', bg: 'bg-purple-500 hover:bg-purple-400' },
+                  { label: 'Pink', hex: '#ec4899', bg: 'bg-pink-500 hover:bg-pink-400' },
+                  { label: 'Rose', hex: '#f43f5e', bg: 'bg-rose-500 hover:bg-rose-400' },
+                ].map((swatch) => {
+                  const isSelected = color.toLowerCase() === swatch.hex.toLowerCase();
+                  return (
+                    <button
+                      key={swatch.label}
+                      type="button"
+                      onClick={() => setColor(swatch.hex)}
+                      className={`w-7 h-7 rounded-lg ${swatch.bg} transition-all duration-150 flex items-center justify-center cursor-pointer border ${
+                        isSelected
+                          ? 'ring-2 ring-white scale-110 border-white shadow-lg'
+                          : 'border-white/20 hover:scale-105'
+                      }`}
+                      title={swatch.label + (swatch.hex ? ` (${swatch.hex})` : ' (Default Dark)')}
+                    >
+                      {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Custom Color Input & Reset */}
+              <div className="flex items-center space-x-3 pt-1">
+                <div className="flex items-center space-x-2 bg-slate-950/80 px-2.5 py-1.5 rounded-lg border border-slate-800">
+                  <input
+                    type="color"
+                    value={color || '#6366f1'}
+                    onChange={(e) => setColor(e.target.value)}
+                    className="w-6 h-6 rounded border-0 cursor-pointer bg-transparent"
+                  />
+                  <input
+                    type="text"
+                    value={color}
+                    onChange={(e) => setColor(e.target.value)}
+                    placeholder="#hex code"
+                    className="w-24 bg-transparent text-xs font-mono text-slate-200 focus:outline-none uppercase"
+                  />
+                </div>
+
+                {color && (
+                  <button
+                    type="button"
+                    onClick={() => setColor('')}
+                    className="text-xs text-slate-400 hover:text-slate-200 flex items-center space-x-1 cursor-pointer py-1 px-2 rounded hover:bg-slate-800 transition"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Reset to {parentId ? 'Parent Tint' : 'Default'}</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Inheritance Explanation Help Text */}
+              <div className="p-2.5 rounded-lg bg-slate-950/50 border border-slate-800/80 text-[11px] text-slate-400 leading-relaxed">
+                {parentId ? (
+                  inheritedColor ? (
+                    color ? (
+                      <span className="text-amber-300">
+                        This sub-workspace has its own color ({color}), overriding parent ({parentPreset?.name}'s {inheritedColor}).
+                      </span>
+                    ) : (
+                      <span>
+                        Inheriting parent tint (<strong className="text-emerald-400 font-mono">{inheritedColor}</strong>) from <strong className="text-slate-200">{parentPreset?.name}</strong>.
+                      </span>
+                    )
+                  ) : (
+                    <span>
+                      The parent workspace has no custom tint. This sub-workspace can have its own tint or use the default dark theme.
+                    </span>
+                  )
+                ) : (
+                  <span>
+                    When you select a color for this top-level workspace, all sub-workspaces below it will automatically inherit this color unless they override it individually.
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Display Mode: Text vs SVG Icon */}
+            <div className="space-y-3">
+              <label className="block text-xs font-semibold text-slate-300">
+                Segment Display Mode
+              </label>
+
+              {/* Toggle Buttons */}
+              <div className="grid grid-cols-2 gap-2 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setUseIcon(false)}
+                  className={`py-2 px-3 rounded-lg text-xs font-medium transition cursor-pointer flex items-center justify-center space-x-2 ${
+                    !useIcon
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950 font-semibold'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                >
+                  <span>Aa Text Label</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseIcon(true);
+                    if (!iconId && !customSvg) setIconId('globe');
+                  }}
+                  className={`py-2 px-3 rounded-lg text-xs font-medium transition cursor-pointer flex items-center justify-center space-x-2 ${
+                    useIcon
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950 font-semibold'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>SVG Icon</span>
+                </button>
+              </div>
+
+              {useIcon ? (
+                <div className="space-y-3 bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-white">
+                        <div
+                          className="w-4 h-4 flex items-center justify-center"
+                          dangerouslySetInnerHTML={{
+                            __html: getSvgMarkup(iconId, customSvg),
+                          }}
+                        />
+                      </div>
+                      <div className="text-xs">
+                        <span className="font-semibold text-slate-200 block">
+                          {customSvg
+                            ? 'Custom Raw SVG'
+                            : allAvailableIcons.find((i) => i.id === iconId)?.name || iconId || 'Selected Icon'}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          Swaps slice text for crisp SVG
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowIconPicker(!showIconPicker)}
+                      className="px-2.5 py-1 text-xs font-medium text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 rounded-lg border border-indigo-500/30 transition cursor-pointer"
+                    >
+                      {showIconPicker ? 'Close Picker' : 'Browse Icons'}
+                    </button>
+                  </div>
+
+                  {/* Searchable Icon Picker Grid */}
+                  {showIconPicker && (
+                    <div className="space-y-2 pt-2 border-t border-slate-800 animate-in fade-in duration-150">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-500" />
+                        <input
+                          type="text"
+                          value={iconSearch}
+                          onChange={(e) => setIconSearch(e.target.value)}
+                          placeholder="Search Okta, Chrome, Terminal, GitHub..."
+                          className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-6 gap-1.5 max-h-40 overflow-y-auto p-1 bg-slate-900/60 rounded-lg border border-slate-800/80 custom-scrollbar">
+                        {allAvailableIcons.map((ic) => {
+                          const isSel = iconId === ic.id && !customSvg;
+                          return (
+                            <button
+                              key={ic.id}
+                              type="button"
+                              onClick={() => {
+                                setIconId(ic.id);
+                                setCustomSvg('');
+                              }}
+                              className={`p-2 rounded-lg flex flex-col items-center justify-center transition cursor-pointer border ${
+                                isSel
+                                  ? 'bg-indigo-600/30 border-indigo-400 text-white ring-1 ring-indigo-400'
+                                  : 'border-transparent hover:bg-slate-800 text-slate-400 hover:text-slate-100'
+                              }`}
+                              title={ic.name}
+                            >
+                              <div
+                                className="w-5 h-5 flex items-center justify-center"
+                                dangerouslySetInnerHTML={{ __html: ic.svg }}
+                              />
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Custom SVG raw input toggle */}
+                      <details className="text-[11px] text-slate-400 group">
+                        <summary className="cursor-pointer hover:text-slate-200 font-medium select-none pt-1">
+                          + Advanced: Paste raw custom SVG XML
+                        </summary>
+                        <div className="mt-2 space-y-1.5">
+                          <textarea
+                            value={customSvg}
+                            onChange={(e) => setCustomSvg(e.target.value)}
+                            placeholder="<svg viewBox='0 0 24 24'>...</svg>"
+                            rows={3}
+                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg p-2 text-[10px] font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 resize-none"
+                          />
+                          {customSvg && (
+                            <button
+                              type="button"
+                              onClick={() => setCustomSvg('')}
+                              className="text-[10px] text-rose-400 hover:underline"
+                            >
+                              Clear custom SVG
+                            </button>
+                          )}
+                        </div>
+                      </details>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-3 bg-slate-950/50 rounded-xl border border-slate-800/80 text-xs text-slate-400">
+                  <span>
+                    The radial menu slice will display the workspace name (<strong className="text-slate-200 font-medium">{name}</strong>).
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

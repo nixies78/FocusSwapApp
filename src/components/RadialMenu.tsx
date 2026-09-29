@@ -4,6 +4,23 @@ import { SlidersHorizontal, X, Sparkles, Layers, RefreshCw, Folder, Settings } f
 import { Preset, CleanupSummary } from '../types';
 import { APP_VERSION } from '../version';
 import BookmarkDock from './BookmarkDock';
+import { getSvgMarkup } from '../utils/svgLibrary';
+
+function hexToRgba(hex?: string, alpha = 1): string {
+  if (!hex) return '';
+  let c = hex.replace('#', '').trim();
+  if (c.length === 3) {
+    c = c.split('').map((x) => x + x).join('');
+  }
+  if (c.length === 6) {
+    const num = parseInt(c, 16);
+    const r = (num >> 16) & 255;
+    const g = (num >> 8) & 255;
+    const b = num & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  return hex;
+}
 
 interface RadialMenuProps {
   presets: Preset[];
@@ -322,12 +339,20 @@ export default function RadialMenu({
         const isFolder = hoverTarget.childPreset.actions.some((a) =>
           a.executable.toLowerCase().includes('explorer')
         );
+        const childTint = hoverTarget.childPreset.color || hoverTarget.parentItem.preset?.color;
+        const iconSvg =
+          hoverTarget.childPreset.icon_id || hoverTarget.childPreset.custom_svg
+            ? getSvgMarkup(hoverTarget.childPreset.icon_id, hoverTarget.childPreset.custom_svg)
+            : undefined;
+
         return {
           title: hoverTarget.childPreset.name,
           subtitle: `Sub-workspace of ${hoverTarget.parentItem.name}`,
           isChild: true,
           isFolder,
           isGeneral: false,
+          tint: childTint,
+          iconSvg,
         };
       }
       if (hoverTarget.type === 'main') {
@@ -336,6 +361,12 @@ export default function RadialMenu({
           const isFolder = item.preset?.actions.some((a) =>
             a.executable.toLowerCase().includes('explorer')
           ) || false;
+          const mainTint = item.preset?.color;
+          const iconSvg =
+            item.preset?.icon_id || item.preset?.custom_svg
+              ? getSvgMarkup(item.preset?.icon_id, item.preset?.custom_svg)
+              : undefined;
+
           return {
             title: item.name,
             subtitle:
@@ -344,6 +375,8 @@ export default function RadialMenu({
                 : 'Click to switch',
             isChild: false,
             isFolder,
+            tint: mainTint,
+            iconSvg,
           };
         }
       }
@@ -354,6 +387,12 @@ export default function RadialMenu({
       const isFolder = defaultItem.preset?.actions.some((a) =>
         a.executable.toLowerCase().includes('explorer')
       ) || false;
+      const defTint = defaultItem.preset?.color;
+      const iconSvg =
+        defaultItem.preset?.icon_id || defaultItem.preset?.custom_svg
+          ? getSvgMarkup(defaultItem.preset?.icon_id, defaultItem.preset?.custom_svg)
+          : undefined;
+
       return {
         title: defaultItem.name,
         subtitle:
@@ -362,6 +401,8 @@ export default function RadialMenu({
             : 'Click to switch',
         isChild: false,
         isFolder,
+        tint: defTint,
+        iconSvg,
       };
     }
 
@@ -491,6 +532,25 @@ export default function RadialMenu({
               (hoverTarget?.type === 'main' && hoverTarget.index === slice.index) ||
               (!hoverTarget && keyboardIndex === slice.index);
 
+            const mainTint = slice.item.preset?.color;
+            const hasMainTint = !!mainTint;
+            const mainFill = hasMainTint
+              ? isMainHighlighted
+                ? hexToRgba(mainTint, 0.75)
+                : hexToRgba(mainTint, 0.35)
+              : isMainHighlighted
+                ? 'url(#hoverGrad)'
+                : 'url(#sliceGrad)';
+            const mainStroke = isMainHighlighted
+              ? '#ffffff'
+              : slice.isActiveSession
+                ? '#38bdf8'
+                : hasMainTint
+                  ? hexToRgba(mainTint, 0.85)
+                  : '#334155';
+            const mainStrokeWidth = isMainHighlighted ? 2.5 : slice.isActiveSession ? 2.2 : 1.5;
+            const mainIcon = slice.item.preset?.icon_id || slice.item.preset?.custom_svg;
+
             return (
               <g key={slice.item.id}>
                 {/* Main Donut Sector */}
@@ -502,29 +562,46 @@ export default function RadialMenu({
                 >
                   <path
                     d={slice.pathData}
-                    fill={isMainHighlighted ? 'url(#hoverGrad)' : 'url(#sliceGrad)'}
-                    stroke={isMainHighlighted ? '#818cf8' : slice.isActiveSession ? '#38bdf8' : '#334155'}
-                    strokeWidth={isMainHighlighted ? 2.5 : slice.isActiveSession ? 2 : 1.5}
+                    fill={mainFill}
+                    stroke={mainStroke}
+                    strokeWidth={mainStrokeWidth}
                     filter={isMainHighlighted ? 'url(#glow)' : undefined}
                     className="transition-colors duration-150"
                   />
 
-                  {/* Main Label */}
-                  <g transform={`translate(${slice.textX}, ${slice.textY})`}>
-                    <text
-                      x={0}
-                      y={0}
-                      textAnchor="middle"
-                      dominantBaseline="central"
-                      fill={isMainHighlighted ? '#ffffff' : '#e2e8f0'}
-                      fontSize={isMainHighlighted ? '15' : '14'}
-                      fontWeight={isMainHighlighted ? '700' : '600'}
-                      letterSpacing="0.02em"
-                      className="pointer-events-none select-none transition-all duration-150 font-sans"
-                    >
-                      {slice.item.name}
-                    </text>
-                  </g>
+                  {/* Main Label or SVG Icon */}
+                  {mainIcon ? (
+                    <g transform={`translate(${slice.textX}, ${slice.textY})`} className="pointer-events-none select-none">
+                      <foreignObject x={-14} y={-14} width={28} height={28} className="overflow-visible pointer-events-none">
+                        <div
+                          className={`w-7 h-7 flex items-center justify-center transition-all duration-150 ${
+                            isMainHighlighted
+                              ? 'scale-115 text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]'
+                              : 'text-slate-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]'
+                          }`}
+                          dangerouslySetInnerHTML={{
+                            __html: getSvgMarkup(slice.item.preset?.icon_id, slice.item.preset?.custom_svg),
+                          }}
+                        />
+                      </foreignObject>
+                    </g>
+                  ) : (
+                    <g transform={`translate(${slice.textX}, ${slice.textY})`}>
+                      <text
+                        x={0}
+                        y={0}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill={isMainHighlighted ? '#ffffff' : '#e2e8f0'}
+                        fontSize={isMainHighlighted ? '15' : '14'}
+                        fontWeight={isMainHighlighted ? '700' : '600'}
+                        letterSpacing="0.02em"
+                        className="pointer-events-none select-none transition-all duration-150 font-sans"
+                      >
+                        {slice.item.name}
+                      </text>
+                    </g>
+                  )}
                 </g>
 
                 {/* Outer Ring Nested Child Workspaces */}
@@ -532,6 +609,26 @@ export default function RadialMenu({
                   const isChildHovered =
                     hoverTarget?.type === 'child' &&
                     hoverTarget.childPreset.id === cs.child.id;
+
+                  // Child color inherits parent's color unless child explicitly overrides it
+                  const childTint = cs.child.color || mainTint;
+                  const hasChildTint = !!childTint;
+                  const childFill = hasChildTint
+                    ? isChildHovered
+                      ? hexToRgba(childTint, 0.85)
+                      : hexToRgba(childTint, 0.30)
+                    : isChildHovered
+                      ? 'url(#hoverChildGrad)'
+                      : 'url(#childGrad)';
+                  const childStroke = isChildHovered
+                    ? '#ffffff'
+                    : cs.isChildActive
+                      ? '#38bdf8'
+                      : hasChildTint
+                        ? hexToRgba(childTint, 0.80)
+                        : '#475569';
+                  const childStrokeWidth = isChildHovered ? 2.5 : cs.isChildActive ? 2 : 1.2;
+                  const childIcon = cs.child.icon_id || cs.child.custom_svg;
 
                   return (
                     <g
@@ -550,29 +647,46 @@ export default function RadialMenu({
                       <title>{cs.child.name} (Sub-workspace of {slice.item.name})</title>
                       <path
                         d={cs.childPath}
-                        fill={isChildHovered ? 'url(#hoverChildGrad)' : 'url(#childGrad)'}
-                        stroke={isChildHovered ? '#a5b4fc' : cs.isChildActive ? '#38bdf8' : '#475569'}
-                        strokeWidth={isChildHovered ? 2.5 : cs.isChildActive ? 2 : 1.2}
+                        fill={childFill}
+                        stroke={childStroke}
+                        strokeWidth={childStrokeWidth}
                         filter={isChildHovered ? 'url(#glowChild)' : undefined}
                         className="transition-colors duration-150"
                       />
 
-                      {/* Child Label */}
-                      <g transform={`translate(${cs.childTextX}, ${cs.childTextY})`}>
-                        <text
-                          x={0}
-                          y={0}
-                          textAnchor="middle"
-                          dominantBaseline="central"
-                          fill={isChildHovered ? '#ffffff' : '#cbd5e1'}
-                          fontSize={cs.fontSize}
-                          fontWeight={isChildHovered ? '700' : '500'}
-                          letterSpacing="0.01em"
-                          className="pointer-events-none select-none transition-all duration-150 font-sans"
-                        >
-                          {cs.displayName}
-                        </text>
-                      </g>
+                      {/* Child Label or SVG Icon */}
+                      {childIcon ? (
+                        <g transform={`translate(${cs.childTextX}, ${cs.childTextY})`} className="pointer-events-none select-none">
+                          <foreignObject x={-10} y={-10} width={20} height={20} className="overflow-visible pointer-events-none">
+                            <div
+                              className={`w-5 h-5 flex items-center justify-center transition-all duration-150 ${
+                                isChildHovered
+                                  ? 'scale-115 text-white drop-shadow-[0_0_6px_rgba(255,255,255,0.8)]'
+                                  : 'text-slate-200'
+                              }`}
+                              dangerouslySetInnerHTML={{
+                                __html: getSvgMarkup(cs.child.icon_id, cs.child.custom_svg),
+                              }}
+                            />
+                          </foreignObject>
+                        </g>
+                      ) : (
+                        <g transform={`translate(${cs.childTextX}, ${cs.childTextY})`}>
+                          <text
+                            x={0}
+                            y={0}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            fill={isChildHovered ? '#ffffff' : '#cbd5e1'}
+                            fontSize={cs.fontSize}
+                            fontWeight={isChildHovered ? '700' : '500'}
+                            letterSpacing="0.01em"
+                            className="pointer-events-none select-none transition-all duration-150 font-sans"
+                          >
+                            {cs.displayName}
+                          </text>
+                        </g>
+                      )}
                     </g>
                   );
                 })}
@@ -602,12 +716,20 @@ export default function RadialMenu({
             <div className="flex flex-col items-center px-3 animate-in fade-in zoom-in-95 duration-150">
               <div
                 className={`w-8 h-8 rounded-full flex items-center justify-center mb-1.5 border ${
-                  activeDisplay.isFolder
-                    ? 'bg-amber-500/20 border-amber-400/40 text-amber-300'
-                    : 'bg-indigo-500/20 border-indigo-400/40 text-indigo-300'
+                  activeDisplay.tint
+                    ? 'border-white/30 text-white'
+                    : activeDisplay.isFolder
+                      ? 'bg-amber-500/20 border-amber-400/40 text-amber-300'
+                      : 'bg-indigo-500/20 border-indigo-400/40 text-indigo-300'
                 }`}
+                style={activeDisplay.tint ? { backgroundColor: hexToRgba(activeDisplay.tint, 0.35) } : undefined}
               >
-                {activeDisplay.isFolder ? (
+                {activeDisplay.iconSvg ? (
+                  <div
+                    className="w-4 h-4 text-white flex items-center justify-center"
+                    dangerouslySetInnerHTML={{ __html: activeDisplay.iconSvg }}
+                  />
+                ) : activeDisplay.isFolder ? (
                   <Folder size={16} />
                 ) : (
                   <Layers size={16} />

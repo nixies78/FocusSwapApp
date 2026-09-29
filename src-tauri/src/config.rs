@@ -46,6 +46,12 @@ pub struct Preset {
     #[serde(default)]
     pub parent_id: Option<String>,
     pub actions: Vec<Action>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub icon_id: Option<String>,
+    #[serde(default)]
+    pub custom_svg: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,6 +169,9 @@ impl Default for WorkspaceConfig {
                     shortcut: "1".to_string(),
                     on_switch_away: "nothing".to_string(),
                     parent_id: None,
+                    color: None,
+                    icon_id: None,
+                    custom_svg: None,
                     actions: vec![Action {
                         action_type: "launch".to_string(),
                         executable: "chrome.exe".to_string(),
@@ -189,6 +198,9 @@ impl Default for WorkspaceConfig {
                     shortcut: "2".to_string(),
                     on_switch_away: "nothing".to_string(),
                     parent_id: None,
+                    color: None,
+                    icon_id: None,
+                    custom_svg: None,
                     actions: vec![Action {
                         action_type: "launch".to_string(),
                         executable: "notepad.exe".to_string(),
@@ -212,6 +224,9 @@ impl Default for WorkspaceConfig {
                     shortcut: "3".to_string(),
                     on_switch_away: "nothing".to_string(),
                     parent_id: None,
+                    color: None,
+                    icon_id: None,
+                    custom_svg: None,
                     actions: vec![Action {
                         action_type: "launch".to_string(),
                         executable: "chrome.exe".to_string(),
