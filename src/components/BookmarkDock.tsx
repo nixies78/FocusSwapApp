@@ -15,6 +15,12 @@ export default function BookmarkDock({ onCloseOverlay }: BookmarkDockProps) {
   const [customSvgs, setCustomSvgs] = useState<SvgIconEntry[]>([]);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
+  const [hoveredBm, setHoveredBm] = useState<{
+    name: string;
+    target: string;
+    top: number;
+    left: number;
+  } | null>(null);
 
   const loadBookmarks = useCallback(async () => {
     try {
@@ -136,27 +142,29 @@ export default function BookmarkDock({ onCloseOverlay }: BookmarkDockProps) {
                             <button
                               key={bm.id}
                               type="button"
-                              onClick={() => handleLaunch(bm)}
+                              onClick={() => {
+                                setHoveredBm(null);
+                                handleLaunch(bm);
+                              }}
+                              onMouseEnter={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setHoveredBm({
+                                  name: bm.name,
+                                  target: targetDesc,
+                                  top: rect.top + rect.height / 2,
+                                  left: rect.right + 12,
+                                });
+                              }}
+                              onMouseLeave={() => setHoveredBm(null)}
                               disabled={launchingId === bm.id}
-                              className={`group relative flex items-center justify-center w-12 h-12 rounded-xl bg-slate-800/40 hover:bg-indigo-600/30 border border-slate-700/60 hover:border-indigo-400/80 shadow-sm transition-all duration-150 active:scale-95 cursor-pointer ${
+                              className={`group flex items-center justify-center w-12 h-12 rounded-xl bg-slate-800/40 hover:bg-indigo-600/30 border border-slate-700/60 hover:border-indigo-400/80 shadow-sm transition-all duration-150 active:scale-95 cursor-pointer ${
                                 launchingId === bm.id ? 'opacity-50 animate-pulse' : ''
                               }`}
-                              title={`${bm.name}\n${targetDesc}`}
                             >
                               <div
                                 className="w-5 h-5 text-white group-hover:text-cyan-300 transition-colors flex items-center justify-center p-0.5"
                                 dangerouslySetInnerHTML={{ __html: svgMarkup }}
                               />
-
-                              {/* Hover Floating Tooltip */}
-                              <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-[#0f121d] border border-slate-700/90 rounded-lg shadow-xl shadow-black/80 text-left pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50 whitespace-nowrap hidden group-hover:block">
-                                <span className="text-xs font-semibold text-white block">
-                                  {bm.name}
-                                </span>
-                                <span className="text-[10px] text-slate-400 font-mono block max-w-xs truncate">
-                                  {targetDesc}
-                                </span>
-                              </div>
                             </button>
                           );
                         })}
@@ -176,6 +184,25 @@ export default function BookmarkDock({ onCloseOverlay }: BookmarkDockProps) {
           </div>
         </div>
       </aside>
+
+      {/* Floating Hover Pop-up Outside the Dock */}
+      {hoveredBm && (
+        <div
+          style={{
+            top: `${hoveredBm.top}px`,
+            left: `${hoveredBm.left}px`,
+            transform: 'translateY(-50%)',
+          }}
+          className="fixed z-50 px-3.5 py-2.5 bg-[#0e121e]/95 border border-slate-700/90 rounded-xl shadow-2xl shadow-black/90 pointer-events-none backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100 max-w-sm whitespace-normal"
+        >
+          <span className="text-xs font-semibold text-white block">
+            {hoveredBm.name}
+          </span>
+          <span className="text-[10px] text-cyan-300 font-mono block truncate mt-0.5 max-w-xs">
+            {hoveredBm.target}
+          </span>
+        </div>
+      )}
 
       {/* Admin Modal */}
       <BookmarkAdminModal

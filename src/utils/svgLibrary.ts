@@ -73,6 +73,12 @@ export const BUILTIN_SVGS: BuiltinSvg[] = [
     svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/></svg>`,
   },
   {
+    id: 'okta',
+    name: 'Okta / Octa',
+    category: 'work',
+    svg: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 15.5c-3.038 0-5.5-2.462-5.5-5.5s2.462-5.5 5.5-5.5 5.5 2.462 5.5 5.5-2.462 5.5-5.5 5.5z"/></svg>`,
+  },
+  {
     id: 'notion',
     name: 'Notion / Notes',
     category: 'work',
@@ -217,6 +223,7 @@ export function detectDefaultIcon(title: string, urlOrExe: string): string {
 
   if (combined.includes('youtube')) return 'youtube';
   if (combined.includes('gemini') || combined.includes('chatgpt') || combined.includes('claude')) return 'gemini';
+  if (combined.includes('okta') || combined.includes('octa')) return 'okta';
   if (combined.includes('calendar')) return 'calendar';
   if (combined.includes('mail') || combined.includes('gmail') || combined.includes('inbox')) return 'mail';
   if (combined.includes('notion')) return 'notion';
