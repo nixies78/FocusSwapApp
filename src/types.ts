@@ -119,3 +119,25 @@ export interface BookmarkConfig {
   custom_svgs: SvgIconEntry[];
 }
 
+export interface DocLink {
+  id: string;
+  title: string;
+  doc_url: string;
+  icon?: string;
+  custom_prompt?: string;
+  last_updated?: string;
+  order: number;
+}
+
+export interface DocLinkSettings {
+  openrouter_api_key: string;
+  openrouter_model: string;
+  webhook_url: string;
+  custom_system_prompt?: string;
+}
+
+export interface DocLinkConfig {
+  links: DocLink[];
+  settings: DocLinkSettings;
+}
+

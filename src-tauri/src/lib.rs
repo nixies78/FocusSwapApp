@@ -629,6 +629,28 @@ fn execute_smart_cleanup() -> Result<win32_layout::CleanupSummary, String> {
 }
 
 #[tauri::command]
+fn get_doc_links() -> Result<config::DocLinkConfig, String> {
+    config::get_doc_links_config()
+}
+
+#[tauri::command]
+fn save_doc_links(config: config::DocLinkConfig) -> Result<(), String> {
+    config::save_doc_links_config(config)
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd.exe")
+            .args(["/c", "start", "", &url])
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn update_and_restart(_app: AppHandle) -> Result<(), String> {
     let exe_dir = if let Ok(exe_path) = std::env::current_exe() {
         exe_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf()
@@ -806,6 +828,9 @@ pub fn run() {
             get_bookmarks,
             save_bookmarks,
             execute_bookmark,
+            get_doc_links,
+            save_doc_links,
+            open_external_url,
             execute_smart_cleanup,
             update_and_restart,
         ])

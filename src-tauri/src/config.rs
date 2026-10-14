@@ -149,12 +149,64 @@ impl Default for BookmarkConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocLink {
+    pub id: String,
+    pub title: String,
+    pub doc_url: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub custom_prompt: Option<String>,
+    #[serde(default)]
+    pub last_updated: Option<String>,
+    #[serde(default)]
+    pub order: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocLinkSettings {
+    #[serde(default)]
+    pub openrouter_api_key: String,
+    #[serde(default = "default_openrouter_model")]
+    pub openrouter_model: String,
+    #[serde(default)]
+    pub webhook_url: String,
+    #[serde(default)]
+    pub custom_system_prompt: Option<String>,
+}
+
+fn default_openrouter_model() -> String {
+    "deepseek/deepseek-chat".to_string()
+}
+
+impl Default for DocLinkSettings {
+    fn default() -> Self {
+        Self {
+            openrouter_api_key: String::new(),
+            openrouter_model: default_openrouter_model(),
+            webhook_url: String::new(),
+            custom_system_prompt: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DocLinkConfig {
+    #[serde(default)]
+    pub links: Vec<DocLink>,
+    #[serde(default)]
+    pub settings: DocLinkSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceConfig {
     pub presets: Vec<Preset>,
     #[serde(default)]
     pub cleanup: Option<CleanupConfig>,
     #[serde(default)]
     pub bookmarks: Option<BookmarkConfig>,
+    #[serde(default)]
+    pub doc_links: Option<DocLinkConfig>,
 }
 
 impl Default for WorkspaceConfig {
@@ -162,6 +214,7 @@ impl Default for WorkspaceConfig {
         Self {
             cleanup: Some(CleanupConfig::default()),
             bookmarks: Some(BookmarkConfig::default()),
+            doc_links: Some(DocLinkConfig::default()),
             presets: vec![
                 Preset {
                     id: "calendar".to_string(),
@@ -349,6 +402,7 @@ pub fn save_presets(presets: Vec<Preset>) -> Result<(), String> {
         presets: Vec::new(),
         cleanup: None,
         bookmarks: None,
+        doc_links: None,
     });
     config.presets = presets;
     save_config(&config)
@@ -364,6 +418,7 @@ pub fn save_cleanup_config(cleanup: CleanupConfig) -> Result<(), String> {
         presets: Vec::new(),
         cleanup: None,
         bookmarks: None,
+        doc_links: None,
     });
     cfg.cleanup = Some(cleanup);
     save_config(&cfg)
@@ -379,8 +434,25 @@ pub fn save_bookmarks_config(bookmarks: BookmarkConfig) -> Result<(), String> {
         presets: Vec::new(),
         cleanup: None,
         bookmarks: None,
+        doc_links: None,
     });
     cfg.bookmarks = Some(bookmarks);
+    save_config(&cfg)
+}
+
+pub fn get_doc_links_config() -> Result<DocLinkConfig, String> {
+    let cfg = load_config()?;
+    Ok(cfg.doc_links.unwrap_or_default())
+}
+
+pub fn save_doc_links_config(doc_links: DocLinkConfig) -> Result<(), String> {
+    let mut cfg = load_config().unwrap_or_else(|_| WorkspaceConfig {
+        presets: Vec::new(),
+        cleanup: None,
+        bookmarks: None,
+        doc_links: None,
+    });
+    cfg.doc_links = Some(doc_links);
     save_config(&cfg)
 }
 

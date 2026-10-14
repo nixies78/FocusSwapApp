@@ -1,9 +1,12 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { SlidersHorizontal, X, Sparkles, Layers, RefreshCw, Folder, Settings } from 'lucide-react';
-import { Preset, CleanupSummary } from '../types';
+import { Preset, CleanupSummary, DocLink, DocLinkConfig } from '../types';
 import { APP_VERSION } from '../version';
 import BookmarkDock from './BookmarkDock';
+import DocLinksBar from './DocLinksBar';
+import DocQuickUpdateModal from './DocQuickUpdateModal';
+import DocLinksAdminModal from './DocLinksAdminModal';
 import { getSvgMarkup } from '../utils/svgLibrary';
 
 function hexToRgba(hex?: string, alpha = 1): string {
@@ -59,6 +62,51 @@ export default function RadialMenu({
   const [isUpdating, setIsUpdating] = useState(false);
   const [isCleaning, setIsCleaning] = useState(false);
   const [cleanupToast, setCleanupToast] = useState<string | null>(null);
+
+  // Document Links & AI Sync state
+  const [docConfig, setDocConfig] = useState<DocLinkConfig>({
+    links: [],
+    settings: {
+      openrouter_api_key: '',
+      openrouter_model: 'deepseek/deepseek-chat',
+      webhook_url: '',
+    },
+  });
+  const [activeDocForModal, setActiveDocForModal] = useState<DocLink | null>(null);
+  const [isDocAdminOpen, setIsDocAdminOpen] = useState(false);
+  const [docAdminTab, setDocAdminTab] = useState<'links' | 'ai' | 'webhook'>('links');
+
+  const loadDocLinks = useCallback(async () => {
+    try {
+      const cfg = await invoke<DocLinkConfig>('get_doc_links');
+      if (cfg) {
+        setDocConfig(cfg);
+      }
+    } catch (err) {
+      console.error('Failed to load doc links:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDocLinks();
+  }, [loadDocLinks]);
+
+  const handleSaveDocConfig = async (newConfig: DocLinkConfig) => {
+    try {
+      await invoke('save_doc_links', { config: newConfig });
+      setDocConfig(newConfig);
+    } catch (err) {
+      console.error('Failed to save doc links config:', err);
+    }
+  };
+
+  const handleDocUpdated = async (docId: string) => {
+    const updatedLinks = docConfig.links.map((l) =>
+      l.id === docId ? { ...l, last_updated: new Date().toISOString() } : l
+    );
+    const updatedConfig = { ...docConfig, links: updatedLinks };
+    await handleSaveDocConfig(updatedConfig);
+  };
 
   const handleExecuteSmartCleanup = async () => {
     if (isCleaning) return;
@@ -142,6 +190,10 @@ export default function RadialMenu({
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (activeDocForModal || isDocAdminOpen) {
+        return;
+      }
+
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
@@ -425,15 +477,15 @@ export default function RadialMenu({
         className="absolute w-[640px] h-[640px] rounded-full bg-indigo-600/10 blur-[130px] pointer-events-none"
       />
 
-      {/* Top Left Floating Controls - Sync / Update & Restart */}
+      {/* Top Left Floating Controls - Sync / Update & Restart + Document Update Links */}
       <div
         onClick={(e) => e.stopPropagation()}
-        className="absolute top-8 left-8 flex items-center gap-3 z-50"
+        className="absolute top-8 left-8 flex items-center gap-3 z-50 max-w-[calc(100vw-360px)]"
       >
         <button
           onClick={handleUpdateAndRestart}
           disabled={isUpdating}
-          className="flex items-center gap-2.5 px-4 py-2.5 bg-slate-900/90 hover:bg-slate-800/95 text-slate-200 hover:text-white rounded-xl border border-slate-700/70 shadow-2xl backdrop-blur-xl transition-all duration-150 hover:border-cyan-500/50 hover:shadow-cyan-500/20 active:scale-95 group font-medium text-sm disabled:opacity-50 cursor-pointer"
+          className="flex items-center gap-2.5 px-4 py-2.5 bg-slate-900/90 hover:bg-slate-800/95 text-slate-200 hover:text-white rounded-xl border border-slate-700/70 shadow-2xl backdrop-blur-xl transition-all duration-150 hover:border-cyan-500/50 hover:shadow-cyan-500/20 active:scale-95 group font-medium text-sm disabled:opacity-50 cursor-pointer shrink-0"
           title="Pull latest update from Git and restart FocusDeck"
         >
           <RefreshCw
@@ -444,6 +496,21 @@ export default function RadialMenu({
           />
           <span>{isUpdating ? 'Updating...' : 'Update & Restart'}</span>
         </button>
+
+        <div className="h-6 w-[1px] bg-slate-800/80 shrink-0" />
+
+        <DocLinksBar
+          links={docConfig.links}
+          isConfigured={
+            Boolean(docConfig.settings?.openrouter_api_key?.trim()) &&
+            Boolean(docConfig.settings?.webhook_url?.trim())
+          }
+          onOpenDocModal={(link) => setActiveDocForModal(link)}
+          onOpenAdmin={(tab = 'links') => {
+            setDocAdminTab(tab);
+            setIsDocAdminOpen(true);
+          }}
+        />
       </div>
 
       {/* Left-Hand Bookmarks Dock (Category boxes with white monochrome SVGs) */}
@@ -798,6 +865,29 @@ export default function RadialMenu({
           </button>
         )}
       </div>
+
+      {/* Document Quick Update Modal */}
+      <DocQuickUpdateModal
+        doc={activeDocForModal}
+        settings={docConfig.settings}
+        isOpen={Boolean(activeDocForModal)}
+        onClose={() => setActiveDocForModal(null)}
+        onOpenSettings={(tab) => {
+          setActiveDocForModal(null);
+          setDocAdminTab(tab);
+          setIsDocAdminOpen(true);
+        }}
+        onDocUpdated={handleDocUpdated}
+      />
+
+      {/* Document Links & AI Admin Modal */}
+      <DocLinksAdminModal
+        isOpen={isDocAdminOpen}
+        initialTab={docAdminTab}
+        config={docConfig}
+        onSaveConfig={handleSaveDocConfig}
+        onClose={() => setIsDocAdminOpen(false)}
+      />
     </div>
   );
 }
